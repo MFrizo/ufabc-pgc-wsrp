@@ -5,6 +5,7 @@ Description: Translates the optimized mathematical variables (e.g., binary matri
              ensure sequential ordering of the visited properties.
 """
 
+from typing import Iterable, cast, Any
 import pyomo.environ as pyo
 
 
@@ -23,10 +24,11 @@ def print_routes(model: pyo.ConcreteModel) -> None:
     # We map origin to destination for all edges where x[i,j] is approximately 1.
     # We use > 0.5 to prevent floating-point inaccuracies from solvers (e.g., 0.999999).
     active_edges = {}
-    for i in model.V:
-        for j in model.V:
+    nodes = cast(Iterable, model.V)
+    for i in nodes:
+        for j in nodes:
             if i != j:
-                if pyo.value(model.x[i, j]) > 0.5:
+                if pyo.value(cast(Any, model.x)[i, j]) > 0.5:
                     active_edges[i] = j
 
     # 2. Chronological Traversal (Linked-list approach)
