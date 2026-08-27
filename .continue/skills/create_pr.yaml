@@ -1,0 +1,23 @@
+name: create_pr
+description: Creates a GitHub Pull Request with a pre-formatted description using the GitHub CLI (gh).
+parameters:
+  - name: title
+    description: The title of the Pull Request.
+  - name: branch
+    description: The name of the head branch (the one containing your changes).
+instructions: |
+  1. Ensure you are on the correct branch and your changes are committed.
+  2. Use the `gh pr create` command to create the PR.
+  3. The body of the PR must follow this format:
+     ## Description
+     [Brief description of the PR]
+
+     ## Why
+     [Why the changes were made]
+
+     ## How
+     [How the changes were implemented]
+
+     Generated with [Continue](https://continue.dev)
+     Co-Authored-By: Continue <noreply@continue.dev>
+  4. Ensure you provide the --title, --body, and --head arguments to `gh pr create`.
