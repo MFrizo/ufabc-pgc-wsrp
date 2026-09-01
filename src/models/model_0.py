@@ -34,7 +34,7 @@ def build_model_m0(data: dict) -> pyo.ConcreteModel:
     # =========================================================================
     # 2. PARAMETERS (Data)
     # =========================================================================
-    def distance_rule(i, j):
+    def distance_rule(model_instance, i, j):
         return data['distance_matrix'][i][j]
 
     model.distance = pyo.Param(model.V, model.V, initialize=distance_rule, doc="Distance/Cost c_ij")
