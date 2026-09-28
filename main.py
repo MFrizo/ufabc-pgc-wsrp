@@ -40,8 +40,8 @@ def main():
     solved_model, metrics = solve_model(
         model=abstract_model,
         solver_name='gurobi_direct',
-        time_limit=300,
-        mip_gap=0.0
+        mip_gap=0.0,
+        raw=True
     )
 
     # ---------------------------------------------------------
