@@ -5,16 +5,17 @@ Description: Translates the optimized mathematical variables (e.g., binary matri
              ensure sequential ordering of the visited properties.
 """
 
-from typing import Iterable, cast, Any
+from typing import Iterable, Optional, cast, Any
 import pyomo.environ as pyo
 
 
-def print_routes(model: pyo.ConcreteModel) -> None:
+def print_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None) -> None:
     """
     Extracts the active edges from the TSP model and prints the route in order.
 
     Args:
         model (pyo.ConcreteModel): The solved Pyomo model containing optimized variables.
+        elapsed_time (Optional[float]): Solver execution time in seconds, printed alongside the distance.
     """
     print("\n" + "=" * 50)
     print("ROUTE OPTIMIZATION RESULTS")
@@ -59,4 +60,6 @@ def print_routes(model: pyo.ConcreteModel) -> None:
 
     print(f"Optimal Sequence : {formatted_route}")
     print(f"Total Distance   : {total_cost:.2f} units")
+    if elapsed_time is not None:
+        print(f"Total Time       : {elapsed_time:.4f} seconds")
     print("=" * 50 + "\n")
