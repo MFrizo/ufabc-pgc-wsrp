@@ -52,10 +52,6 @@ def build_model_m1(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    if 'earliest_start' not in data:
-        raise ValueError("M1 requires time windows, but the instance has none: "
-                         "its visits do not fit in the generator's horizon.")
-
     model = pyo.ConcreteModel(name="WSRP_M1_TSPTW")
 
     # =========================================================================

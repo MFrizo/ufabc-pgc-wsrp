@@ -9,9 +9,7 @@ Description: Single point of generation of synthetic, reproducible instances for
 
 import math
 import numpy as np
-from typing import Any, Optional
-
-from src.utils.logger import project_logger
+from typing import Any
 
 # Random stream of each feature. The graph uses the plain seed; every other feature
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
@@ -29,7 +27,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, trave
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
-        horizon (int): Length of the working day, in minutes (e.g. 600 = 08:00 to 18:00).
+        horizon (int): Target length of the working day over which the visits are spread, in
+            minutes (e.g. 600 = 08:00 to 18:00). Extended when the visits don't fit in it.
         fixed_ratio (float): Share of the properties with a fixed start time.
         window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
 
@@ -37,22 +36,15 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, trave
         dict[str, Any]: The instance payload. Keys and the models that read them:
             - 'num_nodes', 'coordinates', 'distance_matrix': all models.
             - 'travel_time', 'service_time': M1 onwards.
-            - 'earliest_start', 'latest_start', 'fixed_visits': M1 onwards. Omitted, with a
-              warning, when the visits cannot fit in the horizon.
+            - 'earliest_start', 'latest_start', 'fixed_visits': M1 onwards.
     """
     num_nodes = num_properties + 1
 
     data_payload = _generate_graph(num_nodes, random_seed)
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
-
-    time_windows = _generate_time_windows(num_nodes, random_seed, travel_time, service_time,
-                                          horizon, fixed_ratio, window_width)
-    if time_windows is None:
-        project_logger.warning(f"Time windows skipped: a {horizon} min horizon cannot fit {num_properties} "
-                               f"visits of {service_time} min with {travel_time} min of travel between them.")
-    else:
-        data_payload.update(time_windows)
+    data_payload.update(_generate_time_windows(num_nodes, random_seed, travel_time, service_time,
+                                               horizon, fixed_ratio, window_width))
 
     return data_payload
 
@@ -98,7 +90,7 @@ def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:
 
 def _generate_time_windows(num_nodes: int, random_seed: int, travel_time: int, service_time: int,
                            horizon: int, fixed_ratio: float,
-                           window_width: tuple[int, int]) -> Optional[dict[str, Any]]:
+                           window_width: tuple[int, int]) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
@@ -109,20 +101,19 @@ def _generate_time_windows(num_nodes: int, random_seed: int, travel_time: int, s
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
-        horizon (int): Length of the working day, in minutes.
+        horizon (int): Target length of the working day, in minutes.
         fixed_ratio (float): Share of the properties with a fixed start time.
         window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
 
     Returns:
-        Optional[dict[str, Any]]: The time windows (e_i, l_i) for every node and the fixed
-                                  visits, or None if the visits cannot fit in the horizon.
+        dict[str, Any]: The time windows (e_i, l_i) for every node and the fixed visits.
     """
     num_properties = num_nodes - 1
 
-    # Every visit must fit in the day: n * (T + S) minutes of mandatory work
+    # The day is a target, not a constraint: the models up to M1 have no working-day
+    # limit, so a day too short for n * (T + S) minutes of work is extended to fit it
+    horizon = max(horizon, num_properties * (travel_time + service_time))
     slack = horizon - num_properties * (travel_time + service_time)
-    if slack < 0:
-        return None
 
     # 1. Enforcing Reproducibility
     rng = np.random.default_rng([random_seed, TIME_WINDOWS_STREAM])
