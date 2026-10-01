@@ -67,11 +67,46 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     num_nodes = num_properties + 1
 
     data_payload = _generate_graph(num_nodes, random_seed)
+    data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
+                                                            service_time_variation)
+    return _complete_instance(data_payload, random_seed=random_seed, num_brokers=num_brokers,
+                              travel_time=travel_time, service_time=service_time, horizon=horizon,
+                              fixed_ratio=fixed_ratio, window_width=window_width, assigned_ratio=assigned_ratio,
+                              speed_profile=speed_profile, working_hours=working_hours,
+                              start_at_homes=start_at_homes)
+
+
+def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_brokers: int, travel_time: int,
+                       service_time: int, horizon: int, fixed_ratio: float, window_width: tuple[int, int],
+                       assigned_ratio: float, speed_profile: Optional[list[tuple[int, float]]],
+                       working_hours: tuple[int, int], start_at_homes: bool) -> dict[str, Any]:
+    """
+    Fills travel times, homes and a feasible hidden schedule on a graph that already
+    has coordinates, a distance matrix and the visit durations.
+
+    Args:
+        data_payload (dict[str, Any]): Instance with 'num_nodes', 'coordinates',
+            'distance_matrix' and 'service_times' already set.
+        random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        num_brokers (int): Number of brokers |K|.
+        travel_time (int): Constant travel time T, used when there is no speed profile.
+        service_time (int): Constant visit duration S kept for the models that read it.
+        horizon (int): Target length of the working day, in minutes.
+        fixed_ratio (float): Share of the properties with a fixed start time.
+        window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
+        assigned_ratio (float): Share of the properties whose visit already has a broker.
+        speed_profile (Optional[list[tuple[int, float]]]): Periods of the day as (start minute,
+            speed in distance units per minute). With None, every trip takes T.
+        working_hours (tuple[int, int]): Start and regular end of every broker's working day.
+        start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
+
+    Returns:
+        dict[str, Any]: The same payload, with the keys every model reads filled in.
+    """
+    num_nodes = data_payload['num_nodes']
     data_payload['num_brokers'] = num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
-    data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
-                                                            service_time_variation)
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
     data_payload.update(_generate_homes(random_seed, num_brokers, data_payload['coordinates'], travel_time,
                                         speed_profile))
