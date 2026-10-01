@@ -158,11 +158,17 @@ def print_broker_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] 
         print("[ERROR] Flow conservation broken. Dead end reached.")
         return
 
+    model_any = cast(Any, model)
     for k, route_sequence in routes.items():
         print(f"{f'Broker {k}':<17}: {' -> '.join(str(node) for node in route_sequence)}")
 
-    print(f"Brokers Used     : {len(routes)} of {len(cast(Any, model).K)}")
-    print(f"Total Distance   : {pyo.value(model.obj):.2f} units")
+    total_distance = sum(pyo.value(model_any.distance[i, j])
+                         for route_sequence in routes.values() for i, j in zip(route_sequence, route_sequence[1:]))
+
+    print(f"Brokers Used     : {len(routes)} of {len(model_any.K)}")
+    print(f"Total Distance   : {total_distance:.2f} units")
+    if hasattr(model, 'w_return'):
+        print(f"Time Out of Base : {pyo.value(model.obj):.2f} minutes")
     if elapsed_time is not None:
         print(f"Total Time       : {elapsed_time:.4f} seconds")
     if solver_mode is not None:
@@ -188,7 +194,7 @@ def print_broker_schedules(model: pyo.ConcreteModel) -> None:
 
     for k, route_sequence in routes.items():
         print(f"Broker {k}")
-        _print_schedule_rows(model, route_sequence)
+        _print_schedule_rows(model, route_sequence, broker=k)
 
     print("=" * 50 + "\n")
 
@@ -214,20 +220,30 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
             print_schedule(model)
 
 
-def _print_schedule_rows(model: pyo.ConcreteModel, route_sequence: list[int]) -> None:
+def _print_schedule_rows(model: pyo.ConcreteModel, route_sequence: list[int], broker: Optional[int] = None) -> None:
     """
-    Prints the start, end and time window of every visit of a closed route.
+    Prints the start, end and time window of every visit of a closed route. Models with
+    per-broker base times (w_departure, w_return) also get the broker's return row.
 
     Args:
         model (pyo.ConcreteModel): The solved Pyomo model with start-time variables (w).
         route_sequence (list[int]): Closed node sequence, starting and ending at the base.
+        broker (Optional[int]): Broker who does the route, in multi-broker models.
     """
     model_any = cast(Any, model)
+    has_base_times = hasattr(model, 'w_departure')
     print(f"{'Node':>4} | {'Start':>7} | {'End':>7} | {'Window':>12}")
 
-    # The trailing base is the return trip, which has no start-time variable
+    # Without per-broker base times, the trailing base is the return trip, which has no start-time variable
     for node in route_sequence[:-1]:
-        start = pyo.value(model_any.w[node])
+        if node == 0 and has_base_times:
+            start = pyo.value(model_any.w_departure[broker])
+        else:
+            start = pyo.value(model_any.w[node])
         end = start + pyo.value(model_any.service[node])
         window = f"[{pyo.value(model_any.earliest[node]):g}, {pyo.value(model_any.latest[node]):g}]"
         print(f"{node:>4} | {start:>7.2f} | {end:>7.2f} | {window:>12}")
+
+    if has_base_times:
+        arrival = pyo.value(model_any.w_return[broker])
+        print(f"{0:>4} | {arrival:>7.2f} | {arrival:>7.2f} | {'':>12}")
