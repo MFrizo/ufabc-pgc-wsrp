@@ -212,13 +212,143 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
         elapsed_time (Optional[float]): Solver execution time in seconds, printed alongside the distance.
         solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
     """
-    if hasattr(model, 'K'):
+    if hasattr(model, 'end'):
+        print_open_routes(model, elapsed_time=elapsed_time, solver_mode=solver_mode)
+        print_open_schedules(model)
+    elif hasattr(model, 'K'):
         print_broker_routes(model, elapsed_time=elapsed_time, solver_mode=solver_mode)
         print_broker_schedules(model)
     else:
         print_routes(model, elapsed_time=elapsed_time, solver_mode=solver_mode)
         if hasattr(model, 'w'):
             print_schedule(model)
+
+
+def extract_open_routes(model: pyo.ConcreteModel) -> Optional[dict[int, list[int]]]:
+    """
+    Follows the active arcs of every broker who works in a solved open-route model, from
+    his home (depot[k]) to his virtual end of the day (end[k]).
+
+    Args:
+        model (pyo.ConcreteModel): The solved Pyomo model with arc variables x over ARCS.
+
+    Returns:
+        Optional[dict[int, list[int]]]: The open route of each broker who works,
+                                        or None if flow conservation is broken.
+    """
+    model_any = cast(Any, model)
+    routes = {}
+
+    for k in model_any.K:
+        if pyo.value(model_any.y[k]) < 0.5:
+            continue
+
+        active_edges = {i: j for i, j, arc_broker in model_any.ARCS
+                        if arc_broker == k and pyo.value(model_any.x[i, j, k]) > 0.5}
+
+        route_sequence = [pyo.value(model_any.depot[k])]
+        while route_sequence[-1] != pyo.value(model_any.end[k]):
+            next_node = active_edges.get(route_sequence[-1])
+            if next_node is None or len(route_sequence) > len(model_any.V):
+                return None
+            route_sequence.append(next_node)
+
+        routes[k] = route_sequence
+
+    return routes
+
+
+def print_open_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None,
+                      solver_mode: Optional[str] = None) -> None:
+    """
+    Prints the open route of every broker who works in a solved open-route model, with
+    the distance, delays and overtime of the plan.
+
+    Args:
+        model (pyo.ConcreteModel): The solved Pyomo model with arc variables x over ARCS.
+        elapsed_time (Optional[float]): Solver execution time in seconds, printed alongside the distance.
+        solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
+    """
+    print("\n" + "=" * 50)
+    print("ROUTE OPTIMIZATION RESULTS")
+    print("=" * 50)
+
+    routes = extract_open_routes(model)
+    if routes is None:
+        print("[ERROR] Flow conservation broken. Dead end reached.")
+        return
+
+    model_any = cast(Any, model)
+    for k, route_sequence in routes.items():
+        print(f"{f'Broker {k}':<17}: {' -> '.join(_node_label(model, node) for node in route_sequence)}")
+
+    total_distance = sum(pyo.value(model_any.distance[i, j, k])
+                         for k, route_sequence in routes.items() for i, j in zip(route_sequence, route_sequence[1:]))
+    total_delay = sum(pyo.value(model_any.delay[i]) for i in model_any.C)
+    total_overtime = sum(pyo.value(model_any.overtime[k]) for k in model_any.K)
+
+    print(f"Brokers Used     : {len(routes)} of {len(model_any.K)}")
+    print(f"Total Distance   : {total_distance:.2f} units")
+    print(f"Total Delay      : {total_delay:.2f} minutes")
+    print(f"Total Overtime   : {total_overtime:.2f} minutes")
+    if elapsed_time is not None:
+        print(f"Total Time       : {elapsed_time:.4f} seconds")
+    if solver_mode is not None:
+        print(f"Solver Mode      : {solver_mode}")
+    print("=" * 50 + "\n")
+
+
+def print_open_schedules(model: pyo.ConcreteModel) -> None:
+    """
+    Prints the schedule of every broker who works in a solved open-route model, with the
+    scheduled start and the delay of each visit.
+
+    Args:
+        model (pyo.ConcreteModel): The solved Pyomo model with start-time variables (w).
+    """
+    print("=" * 50)
+    print("SCHEDULE (minutes from the start of the day)")
+    print("=" * 50)
+
+    routes = extract_open_routes(model)
+    if routes is None:
+        print("[ERROR] Flow conservation broken. Dead end reached.")
+        return
+
+    model_any = cast(Any, model)
+    for k, route_sequence in routes.items():
+        print(f"Broker {k}")
+        print(f"{'Node':>4} | {'Start':>7} | {'End':>7} | {'Scheduled':>9} | {'Delay':>5}")
+        for node in route_sequence:
+            start = pyo.value(model_any.w[node])
+            end = start + pyo.value(model_any.service[node])
+            scheduled, delay = "", ""
+            if node in model_any.C:
+                scheduled = f"{pyo.value(model_any.scheduled[node]):g}"
+                delay = f"{pyo.value(model_any.delay[node]):g}"
+            print(f"{_node_label(model, node):>4} | {start:>7.2f} | {end:>7.2f} | {scheduled:>9} | {delay:>5}")
+
+    print("=" * 50 + "\n")
+
+
+def _node_label(model: pyo.ConcreteModel, node: int) -> str:
+    """
+    Names a node of an open-route model: properties by their index, and the home, lunch
+    and end of the day of broker k as dk, ak and fk.
+
+    Args:
+        model (pyo.ConcreteModel): The open-route Pyomo model.
+        node (int): Node index.
+
+    Returns:
+        str: The node's name.
+    """
+    model_any = cast(Any, model)
+    for prefix, nodes in (('d', model_any.depot), ('a', model_any.lunch), ('f', model_any.end)):
+        for k in model_any.K:
+            if pyo.value(nodes[k]) == node:
+                return f"{prefix}{k}"
+    return str(node)
 
 
 def _print_schedule_rows(model: pyo.ConcreteModel, route_sequence: list[int], broker: Optional[int] = None) -> None:
