@@ -11,6 +11,7 @@ Usage:
     python main.py --model m3    # Case 4: SDVRPTW
     python main.py --model m4    # Case 5: VRPTWWVST
     python main.py --model m5    # Case 6: TDVRPTW
+    python main.py --model m6    # Case 7: FSMVRPTW
 """
 
 import argparse

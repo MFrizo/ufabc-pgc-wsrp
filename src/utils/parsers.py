@@ -168,7 +168,8 @@ def print_broker_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] 
     print(f"Brokers Used     : {len(routes)} of {len(model_any.K)}")
     print(f"Total Distance   : {total_distance:.2f} units")
     if hasattr(model, 'w_return'):
-        print(f"Time Out of Base : {pyo.value(model.obj):.2f} minutes")
+        time_out = sum(pyo.value(model_any.w_return[k] - model_any.w_departure[k]) for k in model_any.K)
+        print(f"Time Out of Base : {time_out:.2f} minutes")
     if elapsed_time is not None:
         print(f"Total Time       : {elapsed_time:.4f} seconds")
     if solver_mode is not None:
