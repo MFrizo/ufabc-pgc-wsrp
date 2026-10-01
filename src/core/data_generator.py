@@ -16,15 +16,17 @@ from typing import Any
 TIME_WINDOWS_STREAM = 1
 
 
-def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, travel_time: int = 30,
-                           service_time: int = 60, horizon: int = 600, fixed_ratio: float = 0.2,
-                           window_width: tuple[int, int] = (120, 360)) -> dict[str, Any]:
+def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
+                           travel_time: int = 30, service_time: int = 60, horizon: int = 600,
+                           fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360)) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
     Args:
         num_properties (int): The number of properties to be visited.
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        num_brokers (int): Number of brokers |K|. The hidden schedule behind the time windows
+            is split among them, so with more than one broker the visits may overlap.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
         horizon (int): Target length of the working day over which the visits are spread, in
@@ -37,13 +39,15 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, trave
             - 'num_nodes', 'coordinates', 'distance_matrix': all models.
             - 'travel_time', 'service_time': M1 onwards.
             - 'earliest_start', 'latest_start', 'fixed_visits': M1 onwards.
+            - 'num_brokers': M2 onwards.
     """
     num_nodes = num_properties + 1
 
     data_payload = _generate_graph(num_nodes, random_seed)
+    data_payload['num_brokers'] = num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
-    data_payload.update(_generate_time_windows(num_nodes, random_seed, travel_time, service_time,
+    data_payload.update(_generate_time_windows(num_nodes, random_seed, num_brokers, travel_time, service_time,
                                                horizon, fixed_ratio, window_width))
 
     return data_payload
@@ -88,8 +92,8 @@ def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:
     }
 
 
-def _generate_time_windows(num_nodes: int, random_seed: int, travel_time: int, service_time: int,
-                           horizon: int, fixed_ratio: float,
+def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, travel_time: int,
+                           service_time: int, horizon: int, fixed_ratio: float,
                            window_width: tuple[int, int]) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
@@ -99,6 +103,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, travel_time: int, s
     Args:
         num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        num_brokers (int): Number of brokers sharing the hidden schedule.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
         horizon (int): Target length of the working day, in minutes.
@@ -110,24 +115,28 @@ def _generate_time_windows(num_nodes: int, random_seed: int, travel_time: int, s
     """
     num_properties = num_nodes - 1
 
-    # The day is a target, not a constraint: the models up to M1 have no working-day
-    # limit, so a day too short for n * (T + S) minutes of work is extended to fit it
-    horizon = max(horizon, num_properties * (travel_time + service_time))
-    slack = horizon - num_properties * (travel_time + service_time)
-
     # 1. Enforcing Reproducibility
     rng = np.random.default_rng([random_seed, TIME_WINDOWS_STREAM])
 
     # 2. Hidden Reference Schedule
-    # A random visiting order where the day's slack is spread as idle gaps between visits
+    # A random visiting order split among the brokers in consecutive shares
     reference_order = rng.permutation(np.arange(1, num_nodes))
-    gaps = rng.random(num_properties + 1)
-    idle_before = np.cumsum(gaps / gaps.sum() * slack)[:num_properties]
+    broker_shares = np.array_split(reference_order, num_brokers)
 
+    # The day is a target, not a constraint: the models before Case 8 have no working-day
+    # limit, so a day too short for the busiest broker's work is extended to fit it
+    horizon = max(horizon, max(len(share) for share in broker_shares) * (travel_time + service_time))
+
+    # Each broker's slack in the day is spread as idle gaps between its visits
     reference_start = [0] * num_nodes
-    for position, node in enumerate(reference_order):
-        reference_start[node] = math.floor(travel_time + position * (travel_time + service_time)
-                                           + idle_before[position])
+    for share in broker_shares:
+        slack = horizon - len(share) * (travel_time + service_time)
+        gaps = rng.random(len(share) + 1)
+        idle_before = np.cumsum(gaps / gaps.sum() * slack)[:len(share)]
+
+        for position, node in enumerate(share):
+            reference_start[node] = math.floor(travel_time + position * (travel_time + service_time)
+                                               + idle_before[position])
 
     # 3. Time Windows
     # The depot (node 0) may be left at any time of the day
