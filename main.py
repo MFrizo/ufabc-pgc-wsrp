@@ -13,6 +13,7 @@ Usage:
     python main.py --model m5    # Case 6: TDVRPTW
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
+    python main.py --model m8    # Case 8.b: HC-DOMDVRPTW-SD
 """
 
 import argparse

@@ -17,6 +17,12 @@ TIME_WINDOWS_STREAM = 1
 ASSIGNMENTS_STREAM = 2
 SERVICE_TIMES_STREAM = 3
 HOMES_STREAM = 4
+LUNCH_SPOTS_STREAM = 5
+SHIFTS_STREAM = 6
+
+# Range of the start and of the end of each broker's shifts, in minutes from 08:00
+MORNING_SHIFT = ((0, 60), (210, 270))           # Starts 08:00 to 09:00, ends 11:30 to 12:30
+AFTERNOON_SHIFT = ((300, 360), (540, 600))      # Starts 13:00 to 14:00, ends 17:00 to 18:00
 
 
 def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
@@ -25,7 +31,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            assigned_ratio: float = 0.4, service_time_variation: int = 0,
                            speed_profile: Optional[list[tuple[int, float]]] = None,
                            working_hours: tuple[int, int] = (0, 540),
-                           start_at_homes: bool = False) -> dict[str, Any]:
+                           start_at_homes: bool = False, days_off: int = 0,
+                           split_shifts: bool = False) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -50,6 +57,10 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             in minutes (e.g. (0, 540) = 08:00 to 17:00).
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home
             instead of the agency, for the models where the brokers start the day at home.
+        days_off (int): Number of brokers who have no shifts in the day.
+        split_shifts (bool): Whether the hidden schedule fits each broker's visits in his own
+            morning shift, from his home, and afternoon shift, from his lunch spot, for the
+            models where the visits never go past the end of a shift.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -63,6 +74,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'period_starts', 'travel_times': M5 onwards.
             - 'home_coordinates', 'home_distances', 'home_travel_times': M7 onwards.
             - 'shift_start', 'shift_end': M7.
+            - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M8.
     """
     num_nodes = num_properties + 1
 
@@ -73,19 +85,24 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
                                                             service_time_variation)
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
-    data_payload.update(_generate_homes(random_seed, num_brokers, data_payload['coordinates'], travel_time,
-                                        speed_profile))
+    for prefix, stream in (('home', HOMES_STREAM), ('lunch_spot', LUNCH_SPOTS_STREAM)):
+        places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
+                                         travel_time, speed_profile)
+        data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
+    data_payload['shifts'] = _generate_shifts(random_seed, num_brokers, days_off)
 
     # The hidden schedule assumes the slowest period on every trip, so it stays feasible
     # whichever period each trip actually leaves in
     leg_times = np.max(data_payload['travel_times'], axis=0).tolist()
-    if start_at_homes:
+    if start_at_homes or split_shifts:
         first_legs = np.max(data_payload['home_travel_times'], axis=0).tolist()
     else:
         first_legs = [leg_times[0]] * num_brokers
+    lunch_legs = np.max(data_payload['lunch_spot_travel_times'], axis=0).tolist()
 
     time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
-                                          data_payload['service_times'], horizon, fixed_ratio, window_width)
+                                          data_payload['service_times'], horizon, fixed_ratio, window_width,
+                                          data_payload['shifts'] if split_shifts else None, lunch_legs)
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
     data_payload['assigned_broker'] = _generate_assignments(num_nodes, random_seed, reference_broker,
@@ -187,14 +204,15 @@ def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
     }
 
 
-def _generate_homes(random_seed: int, num_brokers: int, coordinates: list[list[float]], travel_time: int,
-                    speed_profile: Optional[list[tuple[int, float]]]) -> dict[str, Any]:
+def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coordinates: list[list[float]],
+                            travel_time: int, speed_profile: Optional[list[tuple[int, float]]]) -> dict[str, Any]:
     """
-    Places the home of every broker in the same 100x100 grid map as the nodes, emulating
-    the brokers' own depots, and computes the distance and travel times to every node.
+    Places one point per broker (e.g. his home) in the same 100x100 grid map as the nodes,
+    and computes the distance and travel times from it to every node.
 
     Args:
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        stream (int): Random stream of the kind of place.
         num_brokers (int): Number of brokers |K|.
         coordinates (list[list[float]]): (x, y) of every node.
         travel_time (int): Constant travel time T, used when there is no speed profile.
@@ -202,31 +220,91 @@ def _generate_homes(random_seed: int, num_brokers: int, coordinates: list[list[f
             speed in distance units per minute), the first starting at 0.
 
     Returns:
-        dict[str, Any]: The home coordinates, the distance from each home to each node and,
-            for each period, the travel time in whole minutes (rounded up) of that trip.
+        dict[str, Any]: The coordinates of each broker's place, the distance from it to each
+            node and, for each period, the travel time in whole minutes (rounded up) of that trip.
     """
-    rng = np.random.default_rng([random_seed, HOMES_STREAM])
-    home_coordinates = rng.random((num_brokers, 2)) * 100.0
+    rng = np.random.default_rng([random_seed, stream])
+    place_coordinates = rng.random((num_brokers, 2)) * 100.0
 
-    home_distances = [[round(math.hypot(home[0] - node[0], home[1] - node[1]), 2) for node in coordinates]
-                      for home in home_coordinates]
+    distances = [[round(math.hypot(place[0] - node[0], place[1] - node[1]), 2) for node in coordinates]
+                 for place in place_coordinates]
 
     if speed_profile is None:
-        home_travel_times = [[[travel_time for _ in row] for row in home_distances]]
+        travel_times = [[[travel_time for _ in row] for row in distances]]
     else:
-        home_travel_times = [[[math.ceil(distance / speed) for distance in row] for row in home_distances]
-                             for _, speed in speed_profile]
+        travel_times = [[[math.ceil(distance / speed) for distance in row] for row in distances]
+                        for _, speed in speed_profile]
 
     return {
-        'home_coordinates': home_coordinates.tolist(),
-        'home_distances': home_distances,
-        'home_travel_times': home_travel_times
+        'coordinates': place_coordinates.tolist(),
+        'distances': distances,
+        'travel_times': travel_times
     }
+
+
+def _generate_shifts(random_seed: int, num_brokers: int, days_off: int) -> list[list[tuple[int, int]]]:
+    """
+    Draws each broker's own shifts: a morning one around 08:00 to 12:00 and an afternoon
+    one around 13:00 to 18:00, the gap between them being his lunch break. Some brokers
+    may have the day off.
+
+    Args:
+        random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        num_brokers (int): Number of brokers |K|.
+        days_off (int): Number of brokers who don't work in the day.
+
+    Returns:
+        list[list[tuple[int, int]]]: The (start, end) of the morning and the afternoon shift
+            of each broker, in minutes, or no shift for the brokers off.
+    """
+    rng = np.random.default_rng([random_seed, SHIFTS_STREAM])
+
+    def draw(bounds):
+        return int(rng.integers(bounds[0], bounds[1] + 1))
+
+    shifts = [[(draw(start), draw(end)) for start, end in (MORNING_SHIFT, AFTERNOON_SHIFT)]
+              for _ in range(num_brokers)]
+
+    for broker in rng.choice(num_brokers, size=days_off, replace=False):
+        shifts[broker] = []
+
+    return shifts
+
+
+def _workload(visits: list[int], first_leg: list[int], leg_times: list[list[int]], service_times: list[int]) -> int:
+    """
+    Minutes of travel and visits it takes to do the visits in order, from a first trip
+    with the given travel times to each node.
+    """
+    return sum((first_leg[node] if previous is None else leg_times[previous][node]) + service_times[node]
+               for previous, node in zip([None, *visits[:-1]], visits))
+
+
+def _place_visits(rng: np.random.Generator, visits: list[int], first_leg: list[int], leg_times: list[list[int]],
+                  service_times: list[int], day_start: int, day_end: int, reference_start: list[int]) -> None:
+    """
+    Places the visits in order between day_start and day_end, spreading the slack as
+    random idle gaps between them, and writes their start times to reference_start.
+    """
+    slack = day_end - day_start - _workload(visits, first_leg, leg_times, service_times)
+    gaps = rng.random(len(visits) + 1)
+    idle_before = np.cumsum(gaps / gaps.sum() * slack)[:len(visits)]
+
+    # Minutes of travel and visits done so far, idle gaps aside
+    busy = 0
+    previous = None
+    for position, node in enumerate(visits):
+        busy += first_leg[node] if previous is None else leg_times[previous][node]
+        reference_start[node] = math.floor(day_start + busy + idle_before[position])
+        busy += service_times[node]
+        previous = node
 
 
 def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, leg_times: list[list[int]],
                            first_legs: list[list[int]], service_times: list[int], horizon: int,
-                           fixed_ratio: float, window_width: tuple[int, int]) -> dict[str, Any]:
+                           fixed_ratio: float, window_width: tuple[int, int],
+                           shifts: Optional[list[list[tuple[int, int]]]] = None,
+                           lunch_legs: Optional[list[list[int]]] = None) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
@@ -243,10 +321,17 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
         horizon (int): Target length of the working day, in minutes.
         fixed_ratio (float): Share of the properties with a fixed start time.
         window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
+        shifts (Optional[list[list[tuple[int, int]]]]): Morning and afternoon shift of each broker.
+            When given, the visits of each broker of the hidden schedule fit in his shifts.
+        lunch_legs (Optional[list[list[int]]]): Travel time from each broker's lunch spot to each
+            node, his first trip of the afternoon shift, in minutes.
 
     Returns:
         dict[str, Any]: The time windows (e_i, l_i) for every node, the fixed visits, and the
             broker who does each visit in the hidden schedule (0 for the depot).
+
+    Raises:
+        ValueError: If the shifts are given and the visits don't fit in them.
     """
     num_properties = num_nodes - 1
 
@@ -254,37 +339,51 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
     rng = np.random.default_rng([random_seed, TIME_WINDOWS_STREAM])
 
     # 2. Hidden Reference Schedule
-    # A random visiting order split among the brokers in consecutive shares
+    # A random visiting order split in consecutive shares among the brokers who work
     reference_order = rng.permutation(np.arange(1, num_nodes))
-    broker_shares = np.array_split(reference_order, num_brokers)
+    working_brokers = [broker for broker in range(1, num_brokers + 1) if shifts is None or shifts[broker - 1]]
 
-    # The day is a target, not a constraint: the models before Case 8 have no working-day
-    # limit, so a day too short for the busiest broker's work is extended to fit it
-    def leg(broker, previous, node):
-        return first_legs[broker - 1][node] if previous is None else leg_times[previous][node]
-
-    workloads = [sum(leg(broker, previous, node) + service_times[node]
-                     for previous, node in zip([None, *share[:-1]], share))
-                 for broker, share in enumerate(broker_shares, start=1)]
-    horizon = max(horizon, max(workloads))
-
-    # Each broker's slack in the day is spread as idle gaps between its visits
     reference_start = [0] * num_nodes
     reference_broker = [0] * num_nodes
-    for broker, (share, workload) in enumerate(zip(broker_shares, workloads), start=1):
-        slack = horizon - workload
-        gaps = rng.random(len(share) + 1)
-        idle_before = np.cumsum(gaps / gaps.sum() * slack)[:len(share)]
 
-        # Minutes of travel and visits the broker has done so far, idle gaps aside
-        busy = 0
-        previous = None
-        for position, node in enumerate(share):
-            busy += leg(broker, previous, node)
-            reference_start[node] = math.floor(busy + idle_before[position])
-            reference_broker[node] = broker
-            busy += service_times[node]
-            previous = node
+    if shifts is None:
+        broker_shares = list(zip(working_brokers, np.array_split(reference_order, len(working_brokers))))
+        for broker, share in broker_shares:
+            for node in share:
+                reference_broker[node] = broker
+
+        # The day is a target, not a constraint: the models before Case 8 have no working-day
+        # limit, so a day too short for the busiest broker's work is extended to fit it
+        horizon = max(horizon, max(_workload(share, first_legs[broker - 1], leg_times, service_times)
+                                   for broker, share in broker_shares))
+
+        # Each broker's slack in the day is spread as idle gaps between its visits
+        for broker, share in broker_shares:
+            _place_visits(rng, share, first_legs[broker - 1], leg_times, service_times, 0, horizon, reference_start)
+    else:
+        horizon = max(horizon, max(end for broker_shifts in shifts for _, end in broker_shifts))
+
+        # The shifts are hard limits, so each shift takes its fair share of the visits left, or
+        # fewer if they don't fit, leaving them to the next shifts. The morning shift is done
+        # from home and the afternoon one from the lunch spot
+        remaining = list(reference_order)
+        num_shifts = 2 * len(working_brokers)
+        for position in range(num_shifts):
+            broker = working_brokers[position // 2]
+            shift_start, shift_end = shifts[broker - 1][position % 2]
+            first_leg = (first_legs if position % 2 == 0 else lunch_legs)[broker - 1]
+
+            size = math.ceil(len(remaining) / (num_shifts - position))
+            while _workload(remaining[:size], first_leg, leg_times, service_times) > shift_end - shift_start:
+                size -= 1
+            share, remaining = remaining[:size], remaining[size:]
+
+            for node in share:
+                reference_broker[node] = broker
+            _place_visits(rng, share, first_leg, leg_times, service_times, shift_start, shift_end, reference_start)
+
+        if remaining:
+            raise ValueError("The visits don't fit in the brokers' shifts; use more brokers or fewer properties.")
 
     # 3. Time Windows
     # The depot (node 0) may be left at any time of the day

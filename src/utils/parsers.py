@@ -226,25 +226,27 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
 
 def extract_open_routes(model: pyo.ConcreteModel) -> Optional[dict[int, list[int]]]:
     """
-    Follows the active arcs of every broker who works in a solved open-route model, from
-    his home (depot[k]) to his virtual end of the day (end[k]).
+    Follows the active arcs of every route in use of a solved open-route model, from its
+    origin (depot[k]) to its virtual end (end[k]). A route is a broker's day, or one of
+    his shifts in the models with shifts (R).
 
     Args:
         model (pyo.ConcreteModel): The solved Pyomo model with arc variables x over ARCS.
 
     Returns:
-        Optional[dict[int, list[int]]]: The open route of each broker who works,
+        Optional[dict[int, list[int]]]: The open route of each route in use,
                                         or None if flow conservation is broken.
     """
     model_any = cast(Any, model)
     routes = {}
 
-    for k in model_any.K:
-        if pyo.value(model_any.y[k]) < 0.5:
-            continue
+    for k in _route_owners(model):
+        active_edges = {i: j for i, j, arc_owner in model_any.ARCS
+                        if arc_owner == k and pyo.value(model_any.x[i, j, k]) > 0.5}
 
-        active_edges = {i: j for i, j, arc_broker in model_any.ARCS
-                        if arc_broker == k and pyo.value(model_any.x[i, j, k]) > 0.5}
+        # Brokers who don't work, and shifts with no visits, have no route
+        if pyo.value(model_any.depot[k]) not in active_edges:
+            continue
 
         route_sequence = [pyo.value(model_any.depot[k])]
         while route_sequence[-1] != pyo.value(model_any.end[k]):
@@ -261,8 +263,8 @@ def extract_open_routes(model: pyo.ConcreteModel) -> Optional[dict[int, list[int
 def print_open_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None,
                       solver_mode: Optional[str] = None) -> None:
     """
-    Prints the open route of every broker who works in a solved open-route model, with
-    the distance, delays and overtime of the plan.
+    Prints every route in use of a solved open-route model, with the distance, delays
+    and, when the model has it, overtime of the plan.
 
     Args:
         model (pyo.ConcreteModel): The solved Pyomo model with arc variables x over ARCS.
@@ -280,17 +282,23 @@ def print_open_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = 
 
     model_any = cast(Any, model)
     for k, route_sequence in routes.items():
-        print(f"{f'Broker {k}':<17}: {' -> '.join(_node_label(model, node) for node in route_sequence)}")
+        label = f"Broker {_route_name(model, k)}"
+        print(f"{label:<17}: {' -> '.join(_node_label(model, node) for node in route_sequence)}")
 
     total_distance = sum(pyo.value(model_any.distance[i, j, k])
                          for k, route_sequence in routes.items() for i, j in zip(route_sequence, route_sequence[1:]))
     total_delay = sum(pyo.value(model_any.delay[i]) for i in model_any.C)
-    total_overtime = sum(pyo.value(model_any.overtime[k]) for k in model_any.K)
+    if hasattr(model, 'route_broker'):
+        brokers_used = len({pyo.value(model_any.route_broker[k]) for k in routes})
+    else:
+        brokers_used = len(routes)
 
-    print(f"Brokers Used     : {len(routes)} of {len(model_any.K)}")
+    print(f"Brokers Used     : {brokers_used} of {len(model_any.K)}")
     print(f"Total Distance   : {total_distance:.2f} units")
     print(f"Total Delay      : {total_delay:.2f} minutes")
-    print(f"Total Overtime   : {total_overtime:.2f} minutes")
+    if hasattr(model, 'overtime'):
+        total_overtime = sum(pyo.value(model_any.overtime[k]) for k in model_any.K)
+        print(f"Total Overtime   : {total_overtime:.2f} minutes")
     if elapsed_time is not None:
         print(f"Total Time       : {elapsed_time:.4f} seconds")
     if solver_mode is not None:
@@ -300,7 +308,7 @@ def print_open_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = 
 
 def print_open_schedules(model: pyo.ConcreteModel) -> None:
     """
-    Prints the schedule of every broker who works in a solved open-route model, with the
+    Prints the schedule of every route in use of a solved open-route model, with the
     scheduled start and the delay of each visit.
 
     Args:
@@ -317,7 +325,7 @@ def print_open_schedules(model: pyo.ConcreteModel) -> None:
 
     model_any = cast(Any, model)
     for k, route_sequence in routes.items():
-        print(f"Broker {k}")
+        print(f"Broker {_route_name(model, k)}")
         print(f"{'Node':>4} | {'Start':>7} | {'End':>7} | {'Scheduled':>9} | {'Delay':>5}")
         for node in route_sequence:
             start = pyo.value(model_any.w[node])
@@ -331,10 +339,26 @@ def print_open_schedules(model: pyo.ConcreteModel) -> None:
     print("=" * 50 + "\n")
 
 
+def _route_owners(model: pyo.ConcreteModel) -> list[int]:
+    """
+    Lists the routes of an open-route model: its shifts (R) if it has them, else its brokers (K).
+    """
+    model_any = cast(Any, model)
+    return list(model_any.R if hasattr(model, 'R') else model_any.K)
+
+
+def _route_name(model: pyo.ConcreteModel, k: int) -> str:
+    """
+    Names a route of an open-route model: its broker, followed by the shift in the models
+    with shifts (e.g. 1A).
+    """
+    return str(pyo.value(cast(Any, model).route_name[k])) if hasattr(model, 'route_name') else str(k)
+
+
 def _node_label(model: pyo.ConcreteModel, node: int) -> str:
     """
-    Names a node of an open-route model: properties by their index, and the home, lunch
-    and end of the day of broker k as dk, ak and fk.
+    Names a node of an open-route model: properties by their index, and the origin, lunch
+    and end of route k as dk, ak and fk.
 
     Args:
         model (pyo.ConcreteModel): The open-route Pyomo model.
@@ -344,10 +368,14 @@ def _node_label(model: pyo.ConcreteModel, node: int) -> str:
         str: The node's name.
     """
     model_any = cast(Any, model)
-    for prefix, nodes in (('d', model_any.depot), ('a', model_any.lunch), ('f', model_any.end)):
-        for k in model_any.K:
+    named_nodes = [('d', model_any.depot), ('f', model_any.end)]
+    if hasattr(model, 'lunch'):
+        named_nodes.append(('a', model_any.lunch))
+
+    for prefix, nodes in named_nodes:
+        for k in _route_owners(model):
             if pyo.value(nodes[k]) == node:
-                return f"{prefix}{k}"
+                return f"{prefix}{_route_name(model, k)}"
     return str(node)
 
 
