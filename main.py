@@ -13,6 +13,7 @@ Usage:
     python main.py --model m5    # Case 6: TDVRPTW
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
+    python main.py --model m8    # Case 8.b: HC-DOMDVRPTW-SD
 """
 
 import argparse
@@ -71,6 +72,6 @@ def main(model_version: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSRP optimization pipeline")
-    parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
-                        help="Model to execute (default: m1)")
+    parser.add_argument('--model', choices=BUILDERS.keys(), default='m7',
+                        help="Model to execute (default: m7, Case 8.a)")
     main(parser.parse_args().model)

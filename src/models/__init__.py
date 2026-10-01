@@ -11,6 +11,7 @@ from src.models.model_4 import build_model_m4
 from src.models.model_5 import build_model_m5
 from src.models.model_6 import build_model_m6
 from src.models.model_7 import build_model_m7
+from src.models.model_8 import build_model_m8
 
 BUILDERS = {
     'm0': build_model_m0,  # Case 1: TSP
@@ -21,6 +22,7 @@ BUILDERS = {
     'm5': build_model_m5,  # Case 6: TDVRPTW
     'm6': build_model_m6,  # Case 7: FSMVRPTW
     'm7': build_model_m7,  # Case 8.a: MO-DOMDVRPTW-SD
+    'm8': build_model_m8,  # Case 8.b: HC-DOMDVRPTW-SD
 }
 
 # Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day
@@ -42,4 +44,6 @@ INSTANCE_SETTINGS = {
            'speed_profile': RUSH_HOURS},  # Case 7: more brokers than needed, to minimize the fleet
     'm7': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'start_at_homes': True},  # Case 8.a: own homes, 08:00 to 17:00 days
+    'm8': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
+           'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # Case 8.b: own shifts, one broker off
 }
