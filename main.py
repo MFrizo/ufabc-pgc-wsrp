@@ -72,6 +72,6 @@ def main(model_version: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSRP optimization pipeline")
-    parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
-                        help="Model to execute (default: m1)")
+    parser.add_argument('--model', choices=BUILDERS.keys(), default='m7',
+                        help="Model to execute (default: m7, Case 8.a)")
     main(parser.parse_args().model)
