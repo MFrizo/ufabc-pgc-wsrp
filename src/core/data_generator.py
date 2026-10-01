@@ -15,12 +15,13 @@ from typing import Any
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
 TIME_WINDOWS_STREAM = 1
 ASSIGNMENTS_STREAM = 2
+SERVICE_TIMES_STREAM = 3
 
 
 def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
                            travel_time: int = 30, service_time: int = 60, horizon: int = 600,
                            fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
-                           assigned_ratio: float = 0.4) -> dict[str, Any]:
+                           assigned_ratio: float = 0.4, service_time_variation: int = 0) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -36,14 +37,18 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         fixed_ratio (float): Share of the properties with a fixed start time.
         window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
         assigned_ratio (float): Share of the properties whose visit already has a broker.
+        service_time_variation (int): Each visit lasts a duration drawn from
+            [S - variation, S + variation], in minutes. With 0, every visit lasts S.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
             - 'num_nodes', 'coordinates', 'distance_matrix': all models.
-            - 'travel_time', 'service_time': M1 onwards.
+            - 'travel_time': M1 onwards.
+            - 'service_time': M1 to M3.
             - 'earliest_start', 'latest_start', 'fixed_visits': M1 onwards.
             - 'num_brokers': M2 onwards.
             - 'assigned_broker': M3 onwards.
+            - 'service_times': M4 onwards.
     """
     num_nodes = num_properties + 1
 
@@ -51,9 +56,11 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     data_payload['num_brokers'] = num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
+    data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
+                                                            service_time_variation)
 
-    time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, travel_time, service_time,
-                                          horizon, fixed_ratio, window_width)
+    time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, travel_time,
+                                          data_payload['service_times'], horizon, fixed_ratio, window_width)
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
     data_payload['assigned_broker'] = _generate_assignments(num_nodes, random_seed, reference_broker,
@@ -101,8 +108,30 @@ def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:
     }
 
 
+def _generate_service_times(num_nodes: int, random_seed: int, service_time: int,
+                            service_time_variation: int) -> list[int]:
+    """
+    Draws the duration of every visit around the constant visit duration S.
+
+    Args:
+        num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
+        random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        service_time (int): Mean visit duration S, in minutes.
+        service_time_variation (int): Max distance of a duration from S, in minutes.
+
+    Returns:
+        list[int]: The duration s_i of the visit at each node, with s_0 = 0 at the depot.
+    """
+    rng = np.random.default_rng([random_seed, SERVICE_TIMES_STREAM])
+
+    durations = rng.integers(service_time - service_time_variation, service_time + service_time_variation + 1,
+                             size=num_nodes - 1)
+
+    return [0] + [int(duration) for duration in durations]
+
+
 def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, travel_time: int,
-                           service_time: int, horizon: int, fixed_ratio: float,
+                           service_times: list[int], horizon: int, fixed_ratio: float,
                            window_width: tuple[int, int]) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
@@ -114,7 +143,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, t
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
         num_brokers (int): Number of brokers sharing the hidden schedule.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
-        service_time (int): Constant visit duration S, in minutes.
+        service_times (list[int]): Duration s_i of the visit at each node, in minutes.
         horizon (int): Target length of the working day, in minutes.
         fixed_ratio (float): Share of the properties with a fixed start time.
         window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
@@ -135,20 +164,23 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, t
 
     # The day is a target, not a constraint: the models before Case 8 have no working-day
     # limit, so a day too short for the busiest broker's work is extended to fit it
-    horizon = max(horizon, max(len(share) for share in broker_shares) * (travel_time + service_time))
+    workloads = [sum(travel_time + service_times[node] for node in share) for share in broker_shares]
+    horizon = max(horizon, max(workloads))
 
     # Each broker's slack in the day is spread as idle gaps between its visits
     reference_start = [0] * num_nodes
     reference_broker = [0] * num_nodes
-    for broker, share in enumerate(broker_shares, start=1):
-        slack = horizon - len(share) * (travel_time + service_time)
+    for broker, (share, workload) in enumerate(zip(broker_shares, workloads), start=1):
+        slack = horizon - workload
         gaps = rng.random(len(share) + 1)
         idle_before = np.cumsum(gaps / gaps.sum() * slack)[:len(share)]
 
+        # Minutes of travel and visits the broker has done before the current visit
+        busy = 0
         for position, node in enumerate(share):
-            reference_start[node] = math.floor(travel_time + position * (travel_time + service_time)
-                                               + idle_before[position])
+            reference_start[node] = math.floor(travel_time + busy + idle_before[position])
             reference_broker[node] = broker
+            busy += travel_time + service_times[node]
 
     # 3. Time Windows
     # The depot (node 0) may be left at any time of the day
@@ -168,7 +200,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, t
             width = int(rng.integers(window_width[0], window_width[1] + 1))
             opening = reference_start[node] - int(rng.integers(0, width + 1))
             earliest_start[node] = max(0, opening)
-            latest_start[node] = min(horizon - service_time, opening + width)
+            latest_start[node] = min(horizon - service_times[node], opening + width)
 
     return {
         'earliest_start': earliest_start,
