@@ -8,6 +8,7 @@ Usage:
     python main.py --model m0    # Case 1: TSP
     python main.py --model m1    # Case 2: TSPTW
     python main.py --model m2    # Case 3: VRPTW
+    python main.py --model m3    # Case 4: SDVRPTW
 """
 
 import argparse
