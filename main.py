@@ -9,6 +9,7 @@ Usage:
     python main.py --model m1    # Case 2: TSPTW
     python main.py --model m2    # Case 3: VRPTW
     python main.py --model m3    # Case 4: SDVRPTW
+    python main.py --model m4    # Case 5: VRPTWWVST
 """
 
 import argparse
