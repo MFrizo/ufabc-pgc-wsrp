@@ -89,7 +89,8 @@ def solve_model(model: pyo.ConcreteModel, solver_name: str = 'gurobi_direct',
     metrics = {
         'cpu_time_seconds': cpu_time,
         'solver_status': str(results.solver.status),
-        'termination_condition': str(results.solver.termination_condition)
+        'termination_condition': str(results.solver.termination_condition),
+        'solver_mode': 'raw' if raw and 'gurobi' in solver_name else 'default'
     }
 
     return model, metrics

@@ -53,13 +53,14 @@ def extract_route(model: pyo.ConcreteModel) -> Optional[list[int]]:
         current_node = next_node
 
 
-def print_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None) -> None:
+def print_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None, solver_mode: Optional[str] = None) -> None:
     """
     Extracts the active edges from the TSP model and prints the route in order.
 
     Args:
         model (pyo.ConcreteModel): The solved Pyomo model containing optimized variables.
         elapsed_time (Optional[float]): Solver execution time in seconds, printed alongside the distance.
+        solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
     """
     print("\n" + "=" * 50)
     print("ROUTE OPTIMIZATION RESULTS")
@@ -78,6 +79,8 @@ def print_routes(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None)
     print(f"Total Distance   : {total_cost:.2f} units")
     if elapsed_time is not None:
         print(f"Total Time       : {elapsed_time:.4f} seconds")
+    if solver_mode is not None:
+        print(f"Solver Mode      : {solver_mode}")
     print("=" * 50 + "\n")
 
 

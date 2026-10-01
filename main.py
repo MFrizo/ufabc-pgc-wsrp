@@ -49,7 +49,7 @@ def main():
     # ---------------------------------------------------------
     if metrics['solver_status'] == 'ok':
         project_logger.info(f"Optimization successfully completed in {metrics['cpu_time_seconds']}s.")
-        print_routes(solved_model)
+        print_routes(solved_model, elapsed_time=metrics['cpu_time_seconds'], solver_mode=metrics['solver_mode'])
     else:
         project_logger.error(f"Optimization failed. Termination: {metrics['termination_condition']}")
 
