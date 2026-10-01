@@ -12,13 +12,12 @@ Usage:
 import argparse
 
 from src.utils.logger import project_logger
-from src.core.data_generator import generate_wsrp_m0_instance, generate_wsrp_m1_instance
+from src.core.data_generator import generate_wsrp_instance
 from src.models.model_0 import build_model_m0
 from src.models.model_1 import build_model_m1
 from src.solvers.engine import solve_model
 from src.utils.parsers import print_routes, print_schedule
 
-GENERATORS = {'m0': generate_wsrp_m0_instance, 'm1': generate_wsrp_m1_instance}
 BUILDERS = {'m0': build_model_m0, 'm1': build_model_m1}
 
 
@@ -35,7 +34,7 @@ def main(model_version: str):
     # PHASE 1: Data Ingestion (Mock generation)
     # ---------------------------------------------------------
     project_logger.info("PHASE 1: Ingesting dataset (5 properties + 1 Depot)...")
-    data_payload = GENERATORS[model_version](num_properties=5, random_seed=42)
+    data_payload = generate_wsrp_instance(num_properties=5, random_seed=42)
     project_logger.info(f"Dataset loaded. Total nodes: {data_payload['num_nodes']}")
 
     # ---------------------------------------------------------
@@ -71,6 +70,6 @@ def main(model_version: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSRP optimization pipeline")
-    parser.add_argument('--model', choices=GENERATORS.keys(), default='m1',
+    parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
                         help="Model to execute (default: m1)")
     main(parser.parse_args().model)
