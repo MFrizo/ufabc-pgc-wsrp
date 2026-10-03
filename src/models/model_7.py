@@ -16,6 +16,7 @@ import pyomo.environ as pyo
 DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 LUNCH_DURATION = 60             # s_ak: Length of the lunch break
 LUNCH_WINDOW = (180, 360)       # The lunch starts between 11:00 and 14:00
+MAX_DAY_LENGTH = 720            # A broker's day, from leaving home to his last visit, lasts at most 12 hours
 
 # Default weights of the multi-objective function
 DISTANCE_WEIGHT = 1.0           # W_dist: Standard weight of the distance
@@ -42,6 +43,7 @@ def build_model_m7(data: dict) -> pyo.ConcreteModel:
             - 'earliest_start' (list): Scheduled start h_i of the visit at every property.
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
             - 'shift_start' / 'shift_end' (list): Start E_k and regular end L_k of each broker's day.
+            - 'max_day_length' (int, optional): Longest day J_max, in minutes. Defaults to 12 hours.
             - 'fleet_weight', 'distance_weight', 'delay_weight', 'overtime_weight' (float, optional):
               Weights of the objective. The fleet weight is computed if absent.
 
@@ -151,6 +153,9 @@ def build_model_m7(data: dict) -> pyo.ConcreteModel:
 
     model.shift_start = pyo.Param(model.K, initialize=shift_start_rule, doc="Day start E_k")
     model.shift_end = pyo.Param(model.K, initialize=shift_end_rule, doc="Day end L_k")
+
+    # J_max: Longest day a broker may work, from leaving home to his last visit
+    model.max_day_length = pyo.Param(initialize=data.get('max_day_length', MAX_DAY_LENGTH), doc="Max day length J_max")
 
     # P_ik: Compatibility matrix. A visit with another broker already assigned has P_ik = 0
     def eligibility_rule(model_instance, i, k):
@@ -277,17 +282,23 @@ def build_model_m7(data: dict) -> pyo.ConcreteModel:
     model.soft_window_constraint = pyo.Constraint(model.C, rule=soft_window_rule, doc="Constraint 5.4")
     model.delay_tolerance_constraint = pyo.Constraint(model.C, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
 
-    # 5.5 Working Day: a broker doesn't leave home before his day starts, and the end of
-    # his day past its regular end is overtime
-    # Formula: w_dk >= E_k, w_fk <= L_k + he_k
+    # 5.5 Working Day: a broker doesn't leave home before his day starts, the end of his
+    # day past its regular end is overtime, and his whole day, lunch included, never goes
+    # past the legal limit
+    # Formula: w_dk >= E_k, w_fk <= L_k + he_k, w_fk - w_dk <= J_max
     def day_start_rule(model_instance, k):
         return model_instance.w[model_instance.depot[k]] >= model_instance.shift_start[k]
 
     def day_end_rule(model_instance, k):
         return model_instance.w[model_instance.end[k]] <= model_instance.shift_end[k] + model_instance.overtime[k]
 
+    def day_length_rule(model_instance, k):
+        return (model_instance.w[model_instance.end[k]] - model_instance.w[model_instance.depot[k]]
+                <= model_instance.max_day_length)
+
     model.day_start_constraint = pyo.Constraint(model.K, rule=day_start_rule, doc="Constraint 5.5 start")
     model.day_end_constraint = pyo.Constraint(model.K, rule=day_end_rule, doc="Constraint 5.5 end")
+    model.day_length_constraint = pyo.Constraint(model.K, rule=day_length_rule, doc="Constraint 5.5 length")
 
     # 5.6 Lunch Break: a broker who works goes through his lunch node, starting it
     # between 11:00 and 14:00
