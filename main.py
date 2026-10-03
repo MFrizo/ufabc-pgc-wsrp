@@ -20,7 +20,7 @@ import argparse
 
 from src.utils.logger import project_logger
 from src.core.data_generator import generate_wsrp_instance
-from src.models import BUILDERS, INSTANCE_SETTINGS
+from src.models import BUILDERS, DEFAULT_SEED, DEFAULT_SEEDS, INSTANCE_SETTINGS
 from src.solvers.engine import solve_model
 from src.utils.parsers import print_results
 
@@ -38,7 +38,8 @@ def main(model_version: str):
     # PHASE 1: Data Ingestion (Mock generation)
     # ---------------------------------------------------------
     project_logger.info("PHASE 1: Ingesting dataset (5 properties + 1 Depot)...")
-    data_payload = generate_wsrp_instance(num_properties=5, random_seed=42, **INSTANCE_SETTINGS[model_version])
+    random_seed = DEFAULT_SEEDS.get(model_version, DEFAULT_SEED)
+    data_payload = generate_wsrp_instance(num_properties=5, random_seed=random_seed, **INSTANCE_SETTINGS[model_version])
     project_logger.info(f"Dataset loaded. Total nodes: {data_payload['num_nodes']}")
 
     # ---------------------------------------------------------
