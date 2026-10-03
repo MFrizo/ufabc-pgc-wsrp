@@ -48,3 +48,9 @@ INSTANCE_SETTINGS = {
     'm8': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # Case 8.b: own shifts, one broker off
 }
+
+# Seed of each model's default run
+DEFAULT_SEED = 42
+DEFAULT_SEEDS = {
+    'm7': 17,  # 2 brokers serve 5 to 7 properties; from 8 on, the third one is needed
+}
