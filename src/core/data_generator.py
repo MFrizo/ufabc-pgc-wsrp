@@ -32,7 +32,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            speed_profile: Optional[list[tuple[int, float]]] = None,
                            working_hours: tuple[int, int] = (0, 540),
                            start_at_homes: bool = False, days_off: int = 0,
-                           split_shifts: bool = False) -> dict[str, Any]:
+                           split_shifts: bool = False,
+                           lunch_break: Optional[tuple[int, int, int]] = None) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -61,6 +62,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         split_shifts (bool): Whether the hidden schedule fits each broker's visits in his own
             morning shift, from his home, and afternoon shift, from his lunch spot, for the
             models where the visits never go past the end of a shift.
+        lunch_break (Optional[tuple[int, int, int]]): Earliest start, latest start and duration
+            of the lunch break the hidden schedule leaves in each broker's day, in minutes, for
+            the models where every broker must break for lunch. Not used with split_shifts.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -102,7 +106,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
 
     time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
                                           data_payload['service_times'], horizon, fixed_ratio, window_width,
-                                          data_payload['shifts'] if split_shifts else None, lunch_legs)
+                                          data_payload['shifts'] if split_shifts else None, lunch_legs,
+                                          lunch_break)
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
     data_payload['assigned_broker'] = _generate_assignments(num_nodes, random_seed, reference_broker,
@@ -304,7 +309,8 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
                            first_legs: list[list[int]], service_times: list[int], horizon: int,
                            fixed_ratio: float, window_width: tuple[int, int],
                            shifts: Optional[list[list[tuple[int, int]]]] = None,
-                           lunch_legs: Optional[list[list[int]]] = None) -> dict[str, Any]:
+                           lunch_legs: Optional[list[list[int]]] = None,
+                           lunch_break: Optional[tuple[int, int, int]] = None) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
@@ -325,6 +331,8 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             When given, the visits of each broker of the hidden schedule fit in his shifts.
         lunch_legs (Optional[list[list[int]]]): Travel time from each broker's lunch spot to each
             node, his first trip of the afternoon shift, in minutes.
+        lunch_break (Optional[tuple[int, int, int]]): Earliest start, latest start and duration
+            of a lunch break left in each broker's day, when there are no shifts.
 
     Returns:
         dict[str, Any]: The time windows (e_i, l_i) for every node, the fixed visits, and the
@@ -352,14 +360,41 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             for node in share:
                 reference_broker[node] = broker
 
-        # The day is a target, not a constraint: the models before Case 8 have no working-day
-        # limit, so a day too short for the busiest broker's work is extended to fit it
-        horizon = max(horizon, max(_workload(share, first_legs[broker - 1], leg_times, service_times)
-                                   for broker, share in broker_shares))
+        if lunch_break is None:
+            # The day is a target, not a constraint: the models before Case 8 have no working-day
+            # limit, so a day too short for the busiest broker's work is extended to fit it
+            horizon = max(horizon, max(_workload(share, first_legs[broker - 1], leg_times, service_times)
+                                       for broker, share in broker_shares))
 
-        # Each broker's slack in the day is spread as idle gaps between its visits
-        for broker, share in broker_shares:
-            _place_visits(rng, share, first_legs[broker - 1], leg_times, service_times, 0, horizon, reference_start)
+            # Each broker's slack in the day is spread as idle gaps between its visits
+            for broker, share in broker_shares:
+                _place_visits(rng, share, first_legs[broker - 1], leg_times, service_times, 0, horizon,
+                              reference_start)
+        else:
+            # Every broker breaks for lunch inside the lunch window: the first half of his share
+            # goes before it, or fewer visits if they don't end by the latest lunch start, and
+            # the rest after it, travelling on from his last visit before lunch
+            lunch_earliest, lunch_latest, lunch_duration = lunch_break
+            lunch_plans = []
+            for broker, share in broker_shares:
+                first_leg = first_legs[broker - 1]
+                split = math.ceil(len(share) / 2)
+                while _workload(share[:split], first_leg, leg_times, service_times) > lunch_latest:
+                    split -= 1
+                morning_workload = _workload(share[:split], first_leg, leg_times, service_times)
+                lunch_start = int(rng.integers(max(lunch_earliest, morning_workload), lunch_latest + 1))
+                afternoon_leg = leg_times[share[split - 1]] if split else first_leg
+                lunch_plans.append((broker, share, split, lunch_start, afternoon_leg))
+
+            horizon = max(horizon, max(lunch_start + lunch_duration
+                                       + _workload(share[split:], afternoon_leg, leg_times, service_times)
+                                       for _, share, split, lunch_start, afternoon_leg in lunch_plans))
+
+            for broker, share, split, lunch_start, afternoon_leg in lunch_plans:
+                _place_visits(rng, share[:split], first_legs[broker - 1], leg_times, service_times,
+                              0, lunch_start, reference_start)
+                _place_visits(rng, share[split:], afternoon_leg, leg_times, service_times,
+                              lunch_start + lunch_duration, horizon, reference_start)
     else:
         horizon = max(horizon, max(end for broker_shifts in shifts for _, end in broker_shifts))
 
