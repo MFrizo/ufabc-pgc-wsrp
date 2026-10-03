@@ -13,7 +13,7 @@ Description: Mathematical formulation of Model 7 (M7) for the WSRP.
 import pyomo.environ as pyo
 
 # Rules of Case 8.a, in minutes from the start of the day (08:00)
-DELAY_TOLERANCE = 10            # tol: Max delay of a visit
+DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 LUNCH_DURATION = 60             # s_ak: Length of the lunch break
 LUNCH_WINDOW = (180, 360)       # The lunch starts between 11:00 and 14:00
 
@@ -139,8 +139,8 @@ def build_model_m7(data: dict) -> pyo.ConcreteModel:
 
     model.scheduled = pyo.Param(model.C, initialize=scheduled_rule, doc="Scheduled start h_i")
 
-    # tol: Max delay of a visit
-    model.tolerance = pyo.Param(initialize=DELAY_TOLERANCE, doc="Delay tolerance tol")
+    # tol: Max minutes a visit starts before or after its scheduled time
+    model.tolerance = pyo.Param(initialize=DELAY_TOLERANCE, doc="Tolerance tol")
 
     # E_k / L_k: Start and regular end of each broker's working day
     def shift_start_rule(model_instance, k):
@@ -261,15 +261,19 @@ def build_model_m7(data: dict) -> pyo.ConcreteModel:
 
     model.time_flow_constraint = pyo.Constraint(model.ARCS, rule=time_flow_rule, doc="Constraint 5.3")
 
-    # 5.4 Soft Time Windows: a visit starts by its scheduled time plus its delay, which
-    # never goes past the tolerance
-    # Formula: w_i <= h_i + atraso_i, atraso_i <= tol
+    # 5.4 Soft Time Windows: a visit starts at its scheduled time, at most tol minutes
+    # early or late, and the minutes late are its delay
+    # Formula: w_i >= h_i - tol, w_i <= h_i + atraso_i, atraso_i <= tol
+    def early_start_rule(model_instance, i):
+        return model_instance.w[i] >= model_instance.scheduled[i] - model_instance.tolerance
+
     def soft_window_rule(model_instance, i):
         return model_instance.w[i] <= model_instance.scheduled[i] + model_instance.delay[i]
 
     def delay_tolerance_rule(model_instance, i):
         return model_instance.delay[i] <= model_instance.tolerance
 
+    model.early_start_constraint = pyo.Constraint(model.C, rule=early_start_rule, doc="Constraint 5.4 early")
     model.soft_window_constraint = pyo.Constraint(model.C, rule=soft_window_rule, doc="Constraint 5.4")
     model.delay_tolerance_constraint = pyo.Constraint(model.C, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
 
