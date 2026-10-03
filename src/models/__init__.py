@@ -10,7 +10,7 @@ from src.models.model_3 import build_model_m3
 from src.models.model_4 import build_model_m4
 from src.models.model_5 import build_model_m5
 from src.models.model_6 import build_model_m6
-from src.models.model_7 import build_model_m7, LUNCH_DURATION, LUNCH_WINDOW
+from src.models.model_7 import build_model_m7, LUNCH_DURATION, LUNCH_WINDOW, MAX_DAY_LENGTH
 from src.models.model_8 import build_model_m8
 
 BUILDERS = {
@@ -44,7 +44,8 @@ INSTANCE_SETTINGS = {
            'speed_profile': RUSH_HOURS},  # Case 7: more brokers than needed, to minimize the fleet
     'm7': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'start_at_homes': True,
-           'lunch_break': (*LUNCH_WINDOW, LUNCH_DURATION)},  # Case 8.a: own homes, lunch, 08:00 to 17:00 days
+           'lunch_break': (*LUNCH_WINDOW, LUNCH_DURATION),
+           'max_day_length': MAX_DAY_LENGTH},  # Case 8.a: own homes, lunch, 08:00 to 17:00 days of up to 12 hours
     'm8': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # Case 8.b: own shifts, one broker off
 }

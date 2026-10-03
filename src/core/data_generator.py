@@ -33,7 +33,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            working_hours: tuple[int, int] = (0, 540),
                            start_at_homes: bool = False, days_off: int = 0,
                            split_shifts: bool = False,
-                           lunch_break: Optional[tuple[int, int, int]] = None) -> dict[str, Any]:
+                           lunch_break: Optional[tuple[int, int, int]] = None,
+                           max_day_length: Optional[int] = None) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -65,6 +66,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         lunch_break (Optional[tuple[int, int, int]]): Earliest start, latest start and duration
             of the lunch break the hidden schedule leaves in each broker's day, in minutes, for
             the models where every broker must break for lunch. Not used with split_shifts.
+        max_day_length (Optional[int]): Longest day a broker of the hidden schedule may work, in
+            minutes, for the models that limit it. Not used with split_shifts.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -79,6 +82,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'home_coordinates', 'home_distances', 'home_travel_times': M7 onwards.
             - 'shift_start', 'shift_end': M7.
             - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M8.
+
+    Raises:
+        ValueError: If the visits don't fit in the shifts, or in the longest working day.
     """
     num_nodes = num_properties + 1
 
@@ -107,7 +113,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
                                           data_payload['service_times'], horizon, fixed_ratio, window_width,
                                           data_payload['shifts'] if split_shifts else None, lunch_legs,
-                                          lunch_break)
+                                          lunch_break, max_day_length)
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
     data_payload['assigned_broker'] = _generate_assignments(num_nodes, random_seed, reference_broker,
@@ -310,7 +316,8 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
                            fixed_ratio: float, window_width: tuple[int, int],
                            shifts: Optional[list[list[tuple[int, int]]]] = None,
                            lunch_legs: Optional[list[list[int]]] = None,
-                           lunch_break: Optional[tuple[int, int, int]] = None) -> dict[str, Any]:
+                           lunch_break: Optional[tuple[int, int, int]] = None,
+                           max_day_length: Optional[int] = None) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
@@ -333,13 +340,15 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             node, his first trip of the afternoon shift, in minutes.
         lunch_break (Optional[tuple[int, int, int]]): Earliest start, latest start and duration
             of a lunch break left in each broker's day, when there are no shifts.
+        max_day_length (Optional[int]): Longest day of each broker, when there are no shifts.
 
     Returns:
         dict[str, Any]: The time windows (e_i, l_i) for every node, the fixed visits, and the
             broker who does each visit in the hidden schedule (0 for the depot).
 
     Raises:
-        ValueError: If the shifts are given and the visits don't fit in them.
+        ValueError: If the shifts are given and the visits don't fit in them, or if some
+            broker's visits don't fit in the longest working day.
     """
     num_properties = num_nodes - 1
 
@@ -359,6 +368,9 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
         for broker, share in broker_shares:
             for node in share:
                 reference_broker[node] = broker
+
+        if max_day_length is not None:
+            horizon = min(horizon, max_day_length)
 
         if lunch_break is None:
             # The day is a target, not a constraint: the models before Case 8 have no working-day
@@ -395,6 +407,11 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
                               0, lunch_start, reference_start)
                 _place_visits(rng, share[split:], afternoon_leg, leg_times, service_times,
                               lunch_start + lunch_duration, horizon, reference_start)
+
+        # Every broker of the hidden schedule leaves at the start of the day and ends by the horizon
+        if max_day_length is not None and horizon > max_day_length:
+            raise ValueError("Some broker's visits don't fit in the longest working day; "
+                             "use more brokers or fewer properties.")
     else:
         horizon = max(horizon, max(end for broker_shifts in shifts for _, end in broker_shifts))
 
