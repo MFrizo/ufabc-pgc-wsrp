@@ -10,8 +10,9 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
              is built from listing.address.point.lat and listing.address.point.lon:
              each edge is the straight-line separation of those two coordinates, on
              the same scale the generator uses. The visit length grows with the
-             usable area. Scheduled times, broker assignments and homes still come
-             from the hidden schedule, which keeps the instance feasible.
+             usable area. Each broker's home is a latitude and longitude inside the
+             polygon of that neighborhood. Scheduled times and broker assignments
+             still come from the hidden schedule, which keeps the instance feasible.
 """
 
 import math
@@ -21,7 +22,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from src.core.data_generator import _complete_instance, generate_wsrp_instance
+from src.core.data_generator import HOMES_STREAM, _complete_instance, generate_wsrp_instance
 from src.models import INSTANCE_SETTINGS
 from src.utils.logger import project_logger
 
@@ -157,7 +158,8 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
         city (str): City the sample is drawn from.
         neighborhood (Optional[str]): Neighborhood the sample is drawn from. Required: the
-            solver receives only this neighborhood of this city.
+            solver receives only this neighborhood of this city. Broker homes are drawn
+            inside the convex hull of its listings.
 
     Returns:
         dict[str, Any]: The instance payload of generate_wsrp_instance, plus 'listings'.
@@ -190,8 +192,17 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
     rows = list(chosen.itertuples(index=False))
 
     # listing.address.point.lat / listing.address.point.lon, renamed to lat / lon.
-    # The agency sits at the centroid of those houses.
-    coordinates = _house_graph([row.lat for row in rows], [row.lon for row in rows])
+    # The agency sits at the centroid of the sampled houses. Broker homes are other
+    # points of the same projection, drawn inside the neighborhood's polygon.
+    house_lat = [row.lat for row in rows]
+    house_lon = [row.lon for row in rows]
+    origin_lat, origin_lon, km_per_degree_lon = _map_frame(house_lat, house_lon)
+    coordinates = _house_graph(house_lat, house_lon, origin_lat, origin_lon, km_per_degree_lon)
+    project_logger.info(
+        f"Placing {num_brokers} broker homes inside the polygon of {neighborhood}, {city}."
+    )
+    homes = _broker_homes(random_seed, catalog["lat"].tolist(), catalog["lon"].tolist(), num_brokers,
+                          origin_lat, origin_lon, km_per_degree_lon)
 
     data_payload = {
         "num_nodes": num_properties + 1,
@@ -204,7 +215,7 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                               travel_time=travel_time, service_time=service_time, horizon=horizon,
                               fixed_ratio=fixed_ratio, window_width=window_width, assigned_ratio=assigned_ratio,
                               speed_profile=speed_profile, working_hours=working_hours,
-                              start_at_homes=start_at_homes)
+                              start_at_homes=start_at_homes, home_coordinates=homes)
 
 
 def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optional[str] = None) -> pd.DataFrame:
@@ -304,35 +315,166 @@ def _service_minutes(area: int, service_time: int, service_time_variation: int) 
     return int(round(low + capped / AREA_REFERENCE * (high - low)))
 
 
-def _house_graph(latitudes: list[float], longitudes: list[float]) -> list[list[float]]:
+def _map_frame(latitudes: list[float], longitudes: list[float]) -> tuple[float, float, float]:
     """
-    (x, y) of the agency and of every house.
+    Origin and longitude scale of the equirectangular projection.
 
-    Each house is placed from listing.address.point.lat and listing.address.point.lon.
-    East and north grow in kilometers from the centroid of those coordinates, then
-    in the generator's map units, and the centroid itself is the agency at (50, 50),
-    the middle of the map the homes are drawn on.
-
-    Args:
-        latitudes (list[float]): listing.address.point.lat of each house, in degrees.
-        longitudes (list[float]): listing.address.point.lon of each house, in degrees.
-
-    Returns:
-        list[list[float]]: Index 0 is the agency. The following points are the houses,
-            in the same order, rounded to 2 decimal places.
+    The origin is the centroid of the given coordinates. Longitude is scaled at that
+    latitude, so a kilometer has the same length east and north.
     """
     origin_lat = sum(latitudes) / len(latitudes)
     origin_lon = sum(longitudes) / len(longitudes)
     km_per_degree_lon = KM_PER_DEGREE_LON * math.cos(math.radians(origin_lat))
-    houses = []
-    for lat, lon in zip(latitudes, longitudes):
-        east_km = (lon - origin_lon) * km_per_degree_lon
-        north_km = (lat - origin_lat) * KM_PER_DEGREE_LAT
-        houses.append([round(50.0 + east_km * MAP_UNITS_PER_KM, 2),
-                       round(50.0 + north_km * MAP_UNITS_PER_KM, 2)])
+    return origin_lat, origin_lon, km_per_degree_lon
+
+
+def _to_map(lat: float, lon: float, origin_lat: float, origin_lon: float,
+            km_per_degree_lon: float) -> list[float]:
+    """(x, y) of one coordinate, in map units, rounded to 2 decimal places."""
+    east_km = (lon - origin_lon) * km_per_degree_lon
+    north_km = (lat - origin_lat) * KM_PER_DEGREE_LAT
+    return [round(50.0 + east_km * MAP_UNITS_PER_KM, 2), round(50.0 + north_km * MAP_UNITS_PER_KM, 2)]
+
+
+def _house_graph(latitudes: list[float], longitudes: list[float], origin_lat: float, origin_lon: float,
+                 km_per_degree_lon: float) -> list[list[float]]:
+    """
+    (x, y) of the agency and of every house.
+
+    Each house is placed from listing.address.point.lat and listing.address.point.lon.
+    The centroid of those houses is the agency.
+
+    Args:
+        latitudes (list[float]): listing.address.point.lat of each house, in degrees.
+        longitudes (list[float]): listing.address.point.lon of each house, in degrees.
+        origin_lat (float): Latitude the projection measures north from.
+        origin_lon (float): Longitude the projection measures east from.
+        km_per_degree_lon (float): Kilometers per degree of longitude at origin_lat.
+
+    Returns:
+        list[list[float]]: Index 0 is the agency. The following points are the houses,
+            in the same order.
+    """
+    houses = [_to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon)
+              for lat, lon in zip(latitudes, longitudes)]
     agency = [round(sum(point[0] for point in houses) / len(houses), 2),
               round(sum(point[1] for point in houses) / len(houses), 2)]
     return [agency, *houses]
+
+
+def _broker_homes(random_seed: int, latitudes: list[float], longitudes: list[float], num_brokers: int,
+                  origin_lat: float, origin_lon: float, km_per_degree_lon: float) -> list[list[float]]:
+    """
+    (x, y) of each broker's home, drawn inside the neighborhood polygon.
+
+    The polygon is the convex hull of listing.address.point.lat and
+    listing.address.point.lon for every listing in the city and neighborhood of
+    the call. Each home is a uniform point of that polygon, then placed with the
+    same projection as the houses.
+
+    Args:
+        random_seed (int): Seed of the draw.
+        latitudes (list[float]): listing.address.point.lat of every listing in the region.
+        longitudes (list[float]): listing.address.point.lon of every listing in the region.
+        num_brokers (int): How many homes to place.
+        origin_lat (float): Latitude the projection measures north from.
+        origin_lon (float): Longitude the projection measures east from.
+        km_per_degree_lon (float): Kilometers per degree of longitude at origin_lat.
+
+    Returns:
+        list[list[float]]: One (x, y) per broker, in map units.
+    """
+    rng = np.random.default_rng([random_seed, HOMES_STREAM])
+    hull = _convex_hull(list(zip(longitudes, latitudes)))
+    projected_hull = [_to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon) for lon, lat in hull]
+    homes = []
+    for _ in range(num_brokers):
+        for _attempt in range(100):
+            lon, lat = _random_point_in_hull(rng, hull)
+            home = _to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon)
+            # Rounding can push a point that sat on the boundary just outside the projected hull.
+            if len(projected_hull) < 3 or _inside_convex(home, projected_hull):
+                homes.append(home)
+                break
+        else:
+            centroid_lon = sum(point[0] for point in hull) / len(hull)
+            centroid_lat = sum(point[1] for point in hull) / len(hull)
+            homes.append(_to_map(centroid_lat, centroid_lon, origin_lat, origin_lon, km_per_degree_lon))
+    return homes
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """
+    Convex hull of (x, y) points, counter-clockwise, without the repeated closing vertex.
+
+    Collinear points on an edge are dropped, so the hull is the polygon of the region.
+    """
+    unique = sorted(set(points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(origin: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
+
+
+def _random_point_in_hull(rng: np.random.Generator, hull: list[tuple[float, float]]) -> tuple[float, float]:
+    """A point distributed uniformly inside a convex hull, including its boundary."""
+    if len(hull) == 1:
+        return hull[0]
+    if len(hull) == 2:
+        weight = float(rng.random())
+        return (hull[0][0] + weight * (hull[1][0] - hull[0][0]),
+                hull[0][1] + weight * (hull[1][1] - hull[0][1]))
+
+    origin = hull[0]
+    triangles = []
+    areas = []
+    for index in range(1, len(hull) - 1):
+        left, right = hull[index], hull[index + 1]
+        area = abs((left[0] - origin[0]) * (right[1] - origin[1]) - (left[1] - origin[1]) * (right[0] - origin[0]))
+        if area > 0:
+            triangles.append((origin, left, right))
+            areas.append(area)
+    chosen = int(rng.choice(len(triangles), p=np.array(areas) / sum(areas)))
+    a, b, c = triangles[chosen]
+    r1 = float(rng.random())
+    r2 = float(rng.random())
+    if r1 + r2 > 1:
+        r1, r2 = 1 - r1, 1 - r2
+    return (a[0] + r1 * (b[0] - a[0]) + r2 * (c[0] - a[0]),
+            a[1] + r1 * (b[1] - a[1]) + r2 * (c[1] - a[1]))
+
+
+def _inside_convex(point: list[float], hull: list[list[float]], tolerance: float = 0.02) -> bool:
+    """
+    Whether a point lies inside a counter-clockwise convex hull.
+
+    tolerance is the slack, in the same units as the coordinates, that absorbs rounding
+    a boundary point out of the polygon.
+    """
+    for index, start in enumerate(hull):
+        end = hull[(index + 1) % len(hull)]
+        edge_x = end[0] - start[0]
+        edge_y = end[1] - start[1]
+        length = math.hypot(edge_x, edge_y)
+        if length == 0:
+            continue
+        signed_distance = (edge_x * (point[1] - start[1]) - edge_y * (point[0] - start[0])) / length
+        if signed_distance < -tolerance:
+            return False
+    return True
 
 
 def _distance_matrix(coordinates: list[list[float]]) -> list[list[float]]:

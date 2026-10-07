@@ -79,7 +79,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
 def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_brokers: int, travel_time: int,
                        service_time: int, horizon: int, fixed_ratio: float, window_width: tuple[int, int],
                        assigned_ratio: float, speed_profile: Optional[list[tuple[int, float]]],
-                       working_hours: tuple[int, int], start_at_homes: bool) -> dict[str, Any]:
+                       working_hours: tuple[int, int], start_at_homes: bool,
+                       home_coordinates: Optional[list[list[float]]] = None) -> dict[str, Any]:
     """
     Fills travel times, homes and a feasible hidden schedule on a graph that already
     has coordinates, a distance matrix and the visit durations.
@@ -99,6 +100,8 @@ def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_broke
             speed in distance units per minute). With None, every trip takes T.
         working_hours (tuple[int, int]): Start and regular end of every broker's working day.
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
+        home_coordinates (Optional[list[list[float]]]): (x, y) of each broker's home, in the
+            same units as the node coordinates. With None, each home is drawn on the 100x100 map.
 
     Returns:
         dict[str, Any]: The same payload, with the keys every model reads filled in.
@@ -109,7 +112,7 @@ def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_broke
     data_payload['service_time'] = service_time
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
     data_payload.update(_generate_homes(random_seed, num_brokers, data_payload['coordinates'], travel_time,
-                                        speed_profile))
+                                        speed_profile, home_coordinates))
 
     # The hidden schedule assumes the slowest period on every trip, so it stays feasible
     # whichever period each trip actually leaves in
@@ -223,10 +226,10 @@ def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
 
 
 def _generate_homes(random_seed: int, num_brokers: int, coordinates: list[list[float]], travel_time: int,
-                    speed_profile: Optional[list[tuple[int, float]]]) -> dict[str, Any]:
+                    speed_profile: Optional[list[tuple[int, float]]],
+                    home_coordinates: Optional[list[list[float]]] = None) -> dict[str, Any]:
     """
-    Places the home of every broker in the same 100x100 grid map as the nodes, emulating
-    the brokers' own depots, and computes the distance and travel times to every node.
+    Places the home of every broker and computes the distance and travel times to every node.
 
     Args:
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
@@ -235,13 +238,16 @@ def _generate_homes(random_seed: int, num_brokers: int, coordinates: list[list[f
         travel_time (int): Constant travel time T, used when there is no speed profile.
         speed_profile (Optional[list[tuple[int, float]]]): Periods of the day as (start minute,
             speed in distance units per minute), the first starting at 0.
+        home_coordinates (Optional[list[list[float]]]): (x, y) of each broker's home. With None,
+            each home is drawn on the 100x100 map, emulating the brokers' own depots.
 
     Returns:
         dict[str, Any]: The home coordinates, the distance from each home to each node and,
             for each period, the travel time in whole minutes (rounded up) of that trip.
     """
-    rng = np.random.default_rng([random_seed, HOMES_STREAM])
-    home_coordinates = rng.random((num_brokers, 2)) * 100.0
+    if home_coordinates is None:
+        rng = np.random.default_rng([random_seed, HOMES_STREAM])
+        home_coordinates = (rng.random((num_brokers, 2)) * 100.0).tolist()
 
     home_distances = [[round(math.hypot(home[0] - node[0], home[1] - node[1]), 2) for node in coordinates]
                       for home in home_coordinates]
@@ -253,7 +259,7 @@ def _generate_homes(random_seed: int, num_brokers: int, coordinates: list[list[f
                              for _, speed in speed_profile]
 
     return {
-        'home_coordinates': home_coordinates.tolist(),
+        'home_coordinates': [list(home) for home in home_coordinates],
         'home_distances': home_distances,
         'home_travel_times': home_travel_times
     }

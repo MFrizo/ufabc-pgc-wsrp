@@ -10,6 +10,9 @@ from src.core.listings import (
     KM_PER_DEGREE_LON,
     MAP_UNITS_PER_KM,
     REAL_CATALOG,
+    _convex_hull,
+    _map_frame,
+    _to_map,
     load_instance,
     load_real_catalog,
 )
@@ -68,11 +71,47 @@ class RealDatasetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_instance("real", "m7", city="São Paulo")
 
+    def test_broker_homes_lie_inside_the_neighborhood(self):
+        data = load_instance("real", "m7", num_properties=5, random_seed=42,
+                             city="São Paulo", neighborhood="Moema")
+        catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
+        origin_lat, origin_lon, km_per_degree_lon = _map_frame(
+            [listing["lat"] for listing in data["listings"]],
+            [listing["lon"] for listing in data["listings"]],
+        )
+        projected = [_to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon)
+                     for lat, lon in zip(catalog["lat"], catalog["lon"])]
+        hull = _convex_hull([(point[0], point[1]) for point in projected])
+        polygon = [list(point) for point in hull]
+
+        self.assertEqual(len(data["home_coordinates"]), 3)
+        self.assertGreater(len(polygon), 2)
+        self.assertFalse(self._inside_polygon([0.0, 0.0], polygon))
+        for home in data["home_coordinates"]:
+            self.assertTrue(self._inside_polygon(home, polygon))
+
     def test_synthetic_instance_has_no_listings(self):
         data = load_instance("synthetic", "m7", num_properties=5, random_seed=42)
         self.assertNotIn("listings", data)
         self.assertEqual(data["num_nodes"], 6)
         self.assertEqual(data["num_brokers"], 3)
+        self.assertAlmostEqual(data["home_coordinates"][0][0], 74.81469997204559)
+        self.assertAlmostEqual(data["home_coordinates"][0][1], 26.19289236408897)
+
+    @staticmethod
+    def _inside_polygon(point, polygon, tolerance=0.02):
+        """Half-plane test for a counter-clockwise convex polygon."""
+        for index, start in enumerate(polygon):
+            end = polygon[(index + 1) % len(polygon)]
+            edge_x = end[0] - start[0]
+            edge_y = end[1] - start[1]
+            length = math.hypot(edge_x, edge_y)
+            if length == 0:
+                continue
+            signed_distance = (edge_x * (point[1] - start[1]) - edge_y * (point[0] - start[0])) / length
+            if signed_distance < -tolerance:
+                return False
+        return True
 
 
 if __name__ == "__main__":
