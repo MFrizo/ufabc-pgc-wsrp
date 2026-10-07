@@ -1,9 +1,12 @@
 """
 Module: listings
 Description: Builds a WSRP instance from a real rental catalog, as an alternative to the
-             synthetic generator. Listings are São Paulo rentals with a latitude and a
-             longitude. Those coordinates are laid on the same 100x100 map the generator
-             uses, keeping distances proportional, and the visit length grows with the
+             synthetic generator. The catalog is a snapshot of a Brazilian real estate
+             company, published at
+             https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
+             Listings kept here are São Paulo rentals with a latitude and a longitude.
+             Those coordinates are laid on the same 100x100 map the generator uses,
+             keeping distances proportional, and the visit length grows with the
              usable area. Scheduled times, broker assignments and homes still come from
              the hidden schedule, which keeps the instance feasible.
 """
@@ -17,8 +20,13 @@ import pandas as pd
 
 from src.core.data_generator import _complete_instance, generate_wsrp_instance
 from src.models import INSTANCE_SETTINGS
+from src.utils.logger import project_logger
 
-# Catalog shipped with the repo: cleaned São Paulo rental listings.
+# Snapshot of a Brazilian real estate company:
+# https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
+REAL_CATALOG_SOURCE = "https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent"
+
+# Cleaned São Paulo rows of that snapshot, shipped with the repo.
 REAL_CATALOG = Path(__file__).resolve().parents[2] / "data" / "real.csv"
 
 DATASETS = ("synthetic", "real")
@@ -75,8 +83,8 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         model_version (str): Key of src.models.BUILDERS. Selects that model's generator settings.
         num_properties (int): Number of properties in the instance.
         random_seed (int): Seed of the sample and of the hidden schedule.
-        catalog_path (Optional[str]): Real-listings CSV. Defaults to the São Paulo extract in the repo.
-            The original semicolon export is accepted too.
+        catalog_path (Optional[str]): Real-listings CSV. Defaults to the São Paulo extract of
+            REAL_CATALOG_SOURCE shipped in the repo. The original semicolon export is accepted too.
 
     Returns:
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
@@ -92,6 +100,10 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **settings)
 
     path = catalog_path or REAL_CATALOG
+    project_logger.info(
+        "Real listings are a snapshot of a Brazilian real estate company: "
+        f"{REAL_CATALOG_SOURCE}"
+    )
     return instance_from_dataset(str(path), num_properties=num_properties, random_seed=random_seed, **settings)
 
 

@@ -88,7 +88,10 @@ if __name__ == "__main__":
     parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
                         help="Model to execute (default: m1)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
-                        help="Instance source: synthetic generator, or real rental listings (default: synthetic)")
+                        help="Instance source: synthetic generator, or real rental listings "
+                             "(default: synthetic). The real catalog is a snapshot of a Brazilian "
+                             "real estate company: "
+                             "https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent")
     parser.add_argument('--properties', type=int, default=5,
                         help="Number of properties in the instance (default: 5)")
     parser.add_argument('--seed', type=int, default=42,
