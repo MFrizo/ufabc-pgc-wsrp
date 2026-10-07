@@ -6,11 +6,12 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
              https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
              The file shipped here is the São Paulo slice. Each call keeps one city and
              one neighborhood: the national file is too large for the solver, and a
-             broker does not travel from one city to another. Those coordinates are
-             laid on the same 100x100 map the generator uses, keeping distances
-             proportional, and the visit length grows with the usable area. Scheduled
-             times, broker assignments and homes still come from the hidden schedule,
-             which keeps the instance feasible.
+             broker does not travel from one city to another. The graph of the houses
+             is built from listing.address.point.lat and listing.address.point.lon:
+             each edge is the straight-line separation of those two coordinates, on
+             the same scale the generator uses. The visit length grows with the
+             usable area. Scheduled times, broker assignments and homes still come
+             from the hidden schedule, which keeps the instance feasible.
 """
 
 import math
@@ -48,15 +49,14 @@ DEFAULT_CITY = "São Paulo"
 BRAZIL_LAT = (-34.0, 6.0)
 BRAZIL_LON = (-74.0, -32.0)
 
-# Percentiles 1 and 99 of the São Paulo catalog. The box is mapped onto the 100x100
-# grid isotropically, so a kilometer keeps the same length on both axes.
-LAT_SOUTH = -23.662344
-LAT_NORTH = -23.471914
-LON_WEST = -46.755281
-LON_EAST = -46.508928
-LAT_REFERENCE = -23.55
+# Equirectangular kilometers. Longitude shrinks with the latitude of the sample.
 KM_PER_DEGREE_LAT = 110.574
-KM_PER_DEGREE_LON = 111.320 * math.cos(math.radians(LAT_REFERENCE))
+KM_PER_DEGREE_LON = 111.320
+
+# The generator draws the city on a 100x100 map, about 25 km across, so one kilometer
+# is 4 units and a speed of 2 units per minute is about 30 km/h. The houses keep that
+# scale; their positions come from the listing coordinates, not from that box.
+MAP_UNITS_PER_KM = 4.0
 
 # Labels the catalog uses where a value is missing.
 MISSING_LABELS = {"", "normal", "nan", "none", "<na>"}
@@ -187,25 +187,18 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
 
     rng = np.random.default_rng(random_seed)
     chosen = catalog.iloc[rng.choice(len(catalog), size=num_properties, replace=False)].reset_index(drop=True)
+    rows = list(chosen.itertuples(index=False))
 
-    # Keep kilometer distances, and sit the neighborhood in the middle of the map the
-    # homes are drawn on, whichever city the call asked for.
-    raw_coordinates = [_project(row.lat, row.lon) for row in chosen.itertuples(index=False)]
-    center_x = sum(point[0] for point in raw_coordinates) / num_properties
-    center_y = sum(point[1] for point in raw_coordinates) / num_properties
-    property_coordinates = [[round(point[0] - center_x + 50.0, 2), round(point[1] - center_y + 50.0, 2)]
-                            for point in raw_coordinates]
-    agency = [round(sum(point[0] for point in property_coordinates) / num_properties, 2),
-              round(sum(point[1] for point in property_coordinates) / num_properties, 2)]
-    coordinates = [agency, *property_coordinates]
+    # listing.address.point.lat / listing.address.point.lon, renamed to lat / lon.
+    # The agency sits at the centroid of those houses.
+    coordinates = _house_graph([row.lat for row in rows], [row.lon for row in rows])
 
     data_payload = {
         "num_nodes": num_properties + 1,
         "coordinates": coordinates,
         "distance_matrix": _distance_matrix(coordinates),
-        "service_times": [0] + [_service_minutes(int(row.area), service_time, service_time_variation)
-                                for row in chosen.itertuples(index=False)],
-        "listings": [_listing_record(node, row) for node, row in enumerate(chosen.itertuples(index=False), start=1)],
+        "service_times": [0] + [_service_minutes(int(row.area), service_time, service_time_variation) for row in rows],
+        "listings": [_listing_record(node, row) for node, row in enumerate(rows, start=1)],
     }
     return _complete_instance(data_payload, random_seed=random_seed, num_brokers=num_brokers,
                               travel_time=travel_time, service_time=service_time, horizon=horizon,
@@ -311,15 +304,35 @@ def _service_minutes(area: int, service_time: int, service_time_variation: int) 
     return int(round(low + capped / AREA_REFERENCE * (high - low)))
 
 
-def _project(lat: float, lon: float) -> list[float]:
+def _house_graph(latitudes: list[float], longitudes: list[float]) -> list[list[float]]:
     """
-    (x, y) on the 100x100 map. A kilometer has the same length on both axes, and the
-    percentile box of the city fills the grid.
+    (x, y) of the agency and of every house.
+
+    Each house is placed from listing.address.point.lat and listing.address.point.lon.
+    East and north grow in kilometers from the centroid of those coordinates, then
+    in the generator's map units, and the centroid itself is the agency at (50, 50),
+    the middle of the map the homes are drawn on.
+
+    Args:
+        latitudes (list[float]): listing.address.point.lat of each house, in degrees.
+        longitudes (list[float]): listing.address.point.lon of each house, in degrees.
+
+    Returns:
+        list[list[float]]: Index 0 is the agency. The following points are the houses,
+            in the same order, rounded to 2 decimal places.
     """
-    span_km = max((LAT_NORTH - LAT_SOUTH) * KM_PER_DEGREE_LAT, (LON_EAST - LON_WEST) * KM_PER_DEGREE_LON)
-    x = (lon - LON_WEST) * KM_PER_DEGREE_LON / span_km * 100.0
-    y = (lat - LAT_SOUTH) * KM_PER_DEGREE_LAT / span_km * 100.0
-    return [round(x, 2), round(y, 2)]
+    origin_lat = sum(latitudes) / len(latitudes)
+    origin_lon = sum(longitudes) / len(longitudes)
+    km_per_degree_lon = KM_PER_DEGREE_LON * math.cos(math.radians(origin_lat))
+    houses = []
+    for lat, lon in zip(latitudes, longitudes):
+        east_km = (lon - origin_lon) * km_per_degree_lon
+        north_km = (lat - origin_lat) * KM_PER_DEGREE_LAT
+        houses.append([round(50.0 + east_km * MAP_UNITS_PER_KM, 2),
+                       round(50.0 + north_km * MAP_UNITS_PER_KM, 2)])
+    agency = [round(sum(point[0] for point in houses) / len(houses), 2),
+              round(sum(point[1] for point in houses) / len(houses), 2)]
+    return [agency, *houses]
 
 
 def _distance_matrix(coordinates: list[list[float]]) -> list[list[float]]:

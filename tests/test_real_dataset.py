@@ -2,9 +2,17 @@
 Runs a model on a sample of the real São Paulo rental catalog.
 """
 
+import math
 import unittest
 
-from src.core.listings import REAL_CATALOG, load_instance, load_real_catalog
+from src.core.listings import (
+    KM_PER_DEGREE_LAT,
+    KM_PER_DEGREE_LON,
+    MAP_UNITS_PER_KM,
+    REAL_CATALOG,
+    load_instance,
+    load_real_catalog,
+)
 from src.models.model_7 import build_model_m7
 from src.solvers.engine import solve_model
 
@@ -26,10 +34,35 @@ class RealDatasetTest(unittest.TestCase):
             self.assertGreaterEqual(data["service_times"][listing["node"]], 30)
             self.assertLessEqual(data["service_times"][listing["node"]], 90)
 
+        self._assert_edges_follow_listing_coordinates(data)
+
         solved_model, metrics = solve_model(build_model_m7(data), solver_name="gurobi_direct", mip_gap=0.0, raw=True)
         self.assertEqual(metrics["solver_status"], "ok")
         self.assertEqual(metrics["termination_condition"], "optimal")
         self.assertIsNotNone(solved_model)
+
+    def _assert_edges_follow_listing_coordinates(self, data):
+        """Each edge is the straight-line separation of listing.address.point.lat / lon."""
+        listings = data["listings"]
+        origin_lat = sum(listing["lat"] for listing in listings) / len(listings)
+        origin_lon = sum(listing["lon"] for listing in listings) / len(listings)
+        km_per_degree_lon = KM_PER_DEGREE_LON * math.cos(math.radians(origin_lat))
+        for listing in listings:
+            east_km = (listing["lon"] - origin_lon) * km_per_degree_lon
+            north_km = (listing["lat"] - origin_lat) * KM_PER_DEGREE_LAT
+            expected = [round(50.0 + east_km * MAP_UNITS_PER_KM, 2),
+                        round(50.0 + north_km * MAP_UNITS_PER_KM, 2)]
+            self.assertEqual(data["coordinates"][listing["node"]], expected)
+
+        for left in listings:
+            for right in listings:
+                if left["node"] == right["node"]:
+                    continue
+                start = data["coordinates"][left["node"]]
+                end = data["coordinates"][right["node"]]
+                separation = round(math.hypot(start[0] - end[0], start[1] - end[1]), 2)
+                self.assertEqual(data["distance_matrix"][left["node"]][right["node"]], separation)
+        self.assertGreater(max(max(row) for row in data["distance_matrix"]), 0)
 
     def test_real_instance_requires_a_neighborhood(self):
         with self.assertRaises(ValueError):
