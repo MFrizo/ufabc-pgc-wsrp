@@ -13,8 +13,8 @@ Usage:
     python main.py --model m5    # Case 6: TDVRPTW
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
-    python main.py --model m7 --dataset zap
-    python main.py --model m7 --dataset zap --zap-path "/path/to/dataZAP.csv"
+    python main.py --model m7 --dataset real
+    python main.py --model m7 --dataset real --catalog-path "/path/to/listings.csv"
 """
 
 import argparse
@@ -28,16 +28,16 @@ from src.utils.parsers import print_results
 
 
 def main(model_version: str, dataset: str = "synthetic", num_properties: int = 5, random_seed: int = 42,
-         zap_path: Optional[str] = None):
+         catalog_path: Optional[str] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
     Args:
         model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0', 'm1', 'm2').
-        dataset (str): "synthetic" for the generator, "zap" for the ZAP rental catalog.
+        dataset (str): "synthetic" for the generator, "real" for the rental catalog.
         num_properties (int): Number of properties in the instance.
         random_seed (int): Seed of the sample and of the hidden schedule.
-        zap_path (Optional[str]): ZAP CSV to sample. Defaults to data/dataZAP.csv.
+        catalog_path (Optional[str]): Real-listings CSV. Defaults to data/real.csv.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
@@ -46,7 +46,7 @@ def main(model_version: str, dataset: str = "synthetic", num_properties: int = 5
     # ---------------------------------------------------------
     project_logger.info(f"PHASE 1: Ingesting {dataset} dataset ({num_properties} properties + 1 Depot)...")
     data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
-                                 zap_path=zap_path)
+                                 catalog_path=catalog_path)
     for listing in data_payload.get("listings", []):
         project_logger.info(
             f"  node {listing['node']}: {listing['address']}, {listing['district']} "
@@ -88,14 +88,14 @@ if __name__ == "__main__":
     parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
                         help="Model to execute (default: m1)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
-                        help="Instance source: synthetic generator, or the ZAP rental catalog (default: synthetic)")
+                        help="Instance source: synthetic generator, or real rental listings (default: synthetic)")
     parser.add_argument('--properties', type=int, default=5,
                         help="Number of properties in the instance (default: 5)")
     parser.add_argument('--seed', type=int, default=42,
                         help="Seed of the sample and of the hidden schedule (default: 42)")
-    parser.add_argument('--zap-path', default=None,
-                        help="ZAP CSV to sample when --dataset zap. Defaults to data/dataZAP.csv. "
+    parser.add_argument('--catalog-path', default=None,
+                        help="CSV of real listings when --dataset real. Defaults to data/real.csv. "
                              "The original semicolon export is accepted.")
     args = parser.parse_args()
     main(args.model, dataset=args.dataset, num_properties=args.properties, random_seed=args.seed,
-         zap_path=args.zap_path)
+         catalog_path=args.catalog_path)

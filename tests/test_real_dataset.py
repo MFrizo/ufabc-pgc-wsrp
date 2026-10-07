@@ -1,18 +1,18 @@
 """
-Runs a model on a sample of the ZAP São Paulo rental catalog.
+Runs a model on a sample of the real São Paulo rental catalog.
 """
 
 import unittest
 
-from src.core.listings import ZAP_CATALOG, load_instance, load_zap_catalog
+from src.core.listings import REAL_CATALOG, load_instance, load_real_catalog
 from src.models.model_7 import build_model_m7
 from src.solvers.engine import solve_model
 
 
-class ZapDatasetTest(unittest.TestCase):
-    def test_m7_solves_a_zap_sample(self):
-        data = load_instance("zap", "m7", num_properties=5, random_seed=42)
-        catalog = load_zap_catalog(ZAP_CATALOG)
+class RealDatasetTest(unittest.TestCase):
+    def test_m7_solves_a_real_sample(self):
+        data = load_instance("real", "m7", num_properties=5, random_seed=42)
+        catalog = load_real_catalog(REAL_CATALOG)
         catalog_keys = set(zip(catalog["address"], catalog["district"]))
 
         self.assertEqual(data["num_nodes"], 6)

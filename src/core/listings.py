@@ -1,6 +1,6 @@
 """
 Module: listings
-Description: Builds a WSRP instance from the ZAP rental catalog, as an alternative to the
+Description: Builds a WSRP instance from a real rental catalog, as an alternative to the
              synthetic generator. Listings are São Paulo rentals with a latitude and a
              longitude. Those coordinates are laid on the same 100x100 map the generator
              uses, keeping distances proportional, and the visit length grows with the
@@ -18,10 +18,10 @@ import pandas as pd
 from src.core.data_generator import _complete_instance, generate_wsrp_instance
 from src.models import INSTANCE_SETTINGS
 
-# Catalog shipped with the repo: the São Paulo rows of the ZAP file, already cleaned.
-ZAP_CATALOG = Path(__file__).resolve().parents[2] / "data" / "dataZAP.csv"
+# Catalog shipped with the repo: cleaned São Paulo rental listings.
+REAL_CATALOG = Path(__file__).resolve().parents[2] / "data" / "real.csv"
 
-DATASETS = ("synthetic", "zap")
+DATASETS = ("synthetic", "real")
 
 # Floor area, in m², that maps to the longest visit. Larger homes stay at that length.
 AREA_REFERENCE = 240
@@ -46,7 +46,8 @@ KM_PER_DEGREE_LON = 111.320 * math.cos(math.radians(LAT_REFERENCE))
 # Labels the catalog uses where a value is missing.
 MISSING_LABELS = {"", "normal", "nan", "none", "<na>"}
 
-ZAP_RENAME = {
+# Headers of the original semicolon export, mapped to the columns the instance reads.
+EXPORT_RENAME = {
     "listing.address.street": "address",
     "listing.address.neighborhood": "district",
     "listing.address.city": "city",
@@ -65,20 +66,20 @@ CATALOG_COLUMNS = ("address", "district", "city", "lat", "lon", "area", "bedroom
 
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
-                  zap_path: Optional[str] = None) -> dict[str, Any]:
+                  catalog_path: Optional[str] = None) -> dict[str, Any]:
     """
-    Builds the instance a model runs on, either from the generator or from the ZAP catalog.
+    Builds the instance a model runs on, either from the generator or from the real catalog.
 
     Args:
-        dataset (str): "synthetic" or "zap".
+        dataset (str): "synthetic" or "real".
         model_version (str): Key of src.models.BUILDERS. Selects that model's generator settings.
         num_properties (int): Number of properties in the instance.
         random_seed (int): Seed of the sample and of the hidden schedule.
-        zap_path (Optional[str]): Catalog CSV. Defaults to the São Paulo extract in the repo.
-            The original ZAP export, semicolon-separated, is accepted too.
+        catalog_path (Optional[str]): Real-listings CSV. Defaults to the São Paulo extract in the repo.
+            The original semicolon export is accepted too.
 
     Returns:
-        dict[str, Any]: The instance payload. A ZAP instance also carries 'listings'.
+        dict[str, Any]: The instance payload. A real instance also carries 'listings'.
 
     Raises:
         ValueError: If dataset is unknown or the catalog cannot supply the sample.
@@ -90,7 +91,7 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
     if dataset == "synthetic":
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **settings)
 
-    path = zap_path or ZAP_CATALOG
+    path = catalog_path or REAL_CATALOG
     return instance_from_dataset(str(path), num_properties=num_properties, random_seed=random_seed, **settings)
 
 
@@ -102,10 +103,10 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                           working_hours: tuple[int, int] = (0, 540),
                           start_at_homes: bool = False, city: str = DEFAULT_CITY) -> dict[str, Any]:
     """
-    Samples listings from a ZAP catalog and builds the instance every model reads.
+    Samples listings from the real catalog and builds the instance every model reads.
 
     Args:
-        path (str): Semicolon-separated CSV, either the original ZAP export or the cleaned extract.
+        path (str): Semicolon-separated CSV, either the original export or the cleaned extract.
         num_properties (int): How many listings become visits.
         random_seed (int): Seed for the sample and for the hidden schedule.
         num_brokers (int): Number of brokers |K|.
@@ -130,7 +131,7 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
     Raises:
         ValueError: If the file is missing columns or is smaller than the requested sample.
     """
-    catalog = load_zap_catalog(path, city=city)
+    catalog = load_real_catalog(path, city=city)
     if num_properties < 1:
         raise ValueError("num_properties must be at least 1.")
     if num_properties > len(catalog):
@@ -159,9 +160,9 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                               start_at_homes=start_at_homes)
 
 
-def load_zap_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
+def load_real_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
     """
-    Reads a ZAP export or the cleaned extract and keeps the listings a route can visit.
+    Reads the real catalog, or the original semicolon export, and keeps the listings a route can visit.
 
     Args:
         path (str): CSV path.
@@ -177,7 +178,7 @@ def load_zap_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
     # The export's own "type" column is the publication tier (premium), not the property kind.
     if "listing.unitTypes" in catalog.columns and "type" in catalog.columns:
         catalog = catalog.drop(columns=["type"])
-    catalog = catalog.rename(columns={source: target for source, target in ZAP_RENAME.items() if source in catalog.columns})
+    catalog = catalog.rename(columns={source: target for source, target in EXPORT_RENAME.items() if source in catalog.columns})
 
     missing = [column for column in CATALOG_COLUMNS if column not in catalog.columns]
     if missing:
