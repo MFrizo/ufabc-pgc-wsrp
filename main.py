@@ -13,8 +13,8 @@ Usage:
     python main.py --model m5    # Case 6: TDVRPTW
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
-    python main.py --model m7 --dataset real
-    python main.py --model m7 --dataset real --catalog-path "/path/to/listings.csv"
+    python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema
+    python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema --catalog-path "/path/to/listings.csv"
 """
 
 import argparse
@@ -28,7 +28,7 @@ from src.utils.parsers import print_results
 
 
 def main(model_version: str, dataset: str = "synthetic", num_properties: int = 5, random_seed: int = 42,
-         catalog_path: Optional[str] = None):
+         catalog_path: Optional[str] = None, city: Optional[str] = None, neighborhood: Optional[str] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -38,6 +38,8 @@ def main(model_version: str, dataset: str = "synthetic", num_properties: int = 5
         num_properties (int): Number of properties in the instance.
         random_seed (int): Seed of the sample and of the hidden schedule.
         catalog_path (Optional[str]): Real-listings CSV. Defaults to data/real.csv.
+        city (Optional[str]): City kept when dataset is "real".
+        neighborhood (Optional[str]): Neighborhood kept when dataset is "real".
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
@@ -46,7 +48,7 @@ def main(model_version: str, dataset: str = "synthetic", num_properties: int = 5
     # ---------------------------------------------------------
     project_logger.info(f"PHASE 1: Ingesting {dataset} dataset ({num_properties} properties + 1 Depot)...")
     data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
-                                 catalog_path=catalog_path)
+                                 catalog_path=catalog_path, city=city, neighborhood=neighborhood)
     for listing in data_payload.get("listings", []):
         project_logger.info(
             f"  node {listing['node']}: {listing['address']}, {listing['district']} "
@@ -99,6 +101,13 @@ if __name__ == "__main__":
     parser.add_argument('--catalog-path', default=None,
                         help="CSV of real listings when --dataset real. Defaults to data/real.csv. "
                              "The original semicolon export is accepted.")
+    parser.add_argument('--city', default=None,
+                        help="City kept when --dataset real. Required. A broker does not travel to another city.")
+    parser.add_argument('--neighborhood', default=None,
+                        help="Neighborhood kept when --dataset real. Required. "
+                             "Only this neighborhood is sent to the solver.")
     args = parser.parse_args()
+    if args.dataset == "real" and (not args.city or not args.neighborhood):
+        parser.error("--dataset real requires --city and --neighborhood")
     main(args.model, dataset=args.dataset, num_properties=args.properties, random_seed=args.seed,
-         catalog_path=args.catalog_path)
+         catalog_path=args.catalog_path, city=args.city, neighborhood=args.neighborhood)

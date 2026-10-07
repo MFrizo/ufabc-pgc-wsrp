@@ -10,17 +10,19 @@ from src.solvers.engine import solve_model
 
 
 class RealDatasetTest(unittest.TestCase):
-    def test_m7_solves_a_real_sample(self):
-        data = load_instance("real", "m7", num_properties=5, random_seed=42)
-        catalog = load_real_catalog(REAL_CATALOG)
+    def test_m7_solves_one_neighborhood(self):
+        data = load_instance("real", "m7", num_properties=5, random_seed=42,
+                             city="São Paulo", neighborhood="Moema")
+        catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
         catalog_keys = set(zip(catalog["address"], catalog["district"]))
 
         self.assertEqual(data["num_nodes"], 6)
         self.assertEqual(len(data["listings"]), 5)
-        self.assertGreater(len(catalog), 1000)
+        self.assertGreater(len(catalog), 5)
         for listing in data["listings"]:
             self.assertIn((listing["address"], listing["district"]), catalog_keys)
             self.assertEqual(listing["city"], "São Paulo")
+            self.assertEqual(listing["district"], "Moema")
             self.assertGreaterEqual(data["service_times"][listing["node"]], 30)
             self.assertLessEqual(data["service_times"][listing["node"]], 90)
 
@@ -28,6 +30,10 @@ class RealDatasetTest(unittest.TestCase):
         self.assertEqual(metrics["solver_status"], "ok")
         self.assertEqual(metrics["termination_condition"], "optimal")
         self.assertIsNotNone(solved_model)
+
+    def test_real_instance_requires_a_neighborhood(self):
+        with self.assertRaises(ValueError):
+            load_instance("real", "m7", city="São Paulo")
 
     def test_synthetic_instance_has_no_listings(self):
         data = load_instance("synthetic", "m7", num_properties=5, random_seed=42)

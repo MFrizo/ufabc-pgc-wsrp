@@ -4,11 +4,13 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
              synthetic generator. The catalog is a snapshot of a Brazilian real estate
              company, published at
              https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
-             Listings kept here are São Paulo rentals with a latitude and a longitude.
-             Those coordinates are laid on the same 100x100 map the generator uses,
-             keeping distances proportional, and the visit length grows with the
-             usable area. Scheduled times, broker assignments and homes still come from
-             the hidden schedule, which keeps the instance feasible.
+             The file shipped here is the São Paulo slice. Each call keeps one city and
+             one neighborhood: the national file is too large for the solver, and a
+             broker does not travel from one city to another. Those coordinates are
+             laid on the same 100x100 map the generator uses, keeping distances
+             proportional, and the visit length grows with the usable area. Scheduled
+             times, broker assignments and homes still come from the hidden schedule,
+             which keeps the instance feasible.
 """
 
 import math
@@ -38,8 +40,13 @@ AREA_REFERENCE = 240
 MIN_AREA = 10
 MAX_AREA = 1000
 
-# City the routes are planned in. A national sample would join visits no broker can reach.
+# City the routes are planned in when the caller does not need another one.
+# A national sample would join visits no broker can reach.
 DEFAULT_CITY = "São Paulo"
+
+# Brazil, loose enough to keep every city in the snapshot and drop broken coordinates.
+BRAZIL_LAT = (-34.0, 6.0)
+BRAZIL_LON = (-74.0, -32.0)
 
 # Percentiles 1 and 99 of the São Paulo catalog. The box is mapped onto the 100x100
 # grid isotropically, so a kilometer keeps the same length on both axes.
@@ -74,7 +81,8 @@ CATALOG_COLUMNS = ("address", "district", "city", "lat", "lon", "area", "bedroom
 
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
-                  catalog_path: Optional[str] = None) -> dict[str, Any]:
+                  catalog_path: Optional[str] = None, city: Optional[str] = None,
+                  neighborhood: Optional[str] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
 
@@ -85,12 +93,16 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         random_seed (int): Seed of the sample and of the hidden schedule.
         catalog_path (Optional[str]): Real-listings CSV. Defaults to the São Paulo extract of
             REAL_CATALOG_SOURCE shipped in the repo. The original semicolon export is accepted too.
+        city (Optional[str]): City of a real instance. Required when dataset is "real".
+        neighborhood (Optional[str]): Neighborhood of a real instance. Required when dataset is
+            "real". The sample is drawn only from this neighborhood of this city.
 
     Returns:
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
 
     Raises:
-        ValueError: If dataset is unknown or the catalog cannot supply the sample.
+        ValueError: If dataset is unknown, a real call omits the city or the neighborhood,
+            or the catalog cannot supply the sample.
     """
     if dataset not in DATASETS:
         raise ValueError(f"dataset must be one of: {', '.join(DATASETS)}.")
@@ -99,12 +111,19 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
     if dataset == "synthetic":
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **settings)
 
+    if not city or not str(city).strip() or not neighborhood or not str(neighborhood).strip():
+        raise ValueError(
+            "A real instance needs a city and a neighborhood. "
+            "The full catalog is too large for the solver, and a broker does not travel between cities."
+        )
+
     path = catalog_path or REAL_CATALOG
     project_logger.info(
         "Real listings are a snapshot of a Brazilian real estate company: "
         f"{REAL_CATALOG_SOURCE}"
     )
-    return instance_from_dataset(str(path), num_properties=num_properties, random_seed=random_seed, **settings)
+    return instance_from_dataset(str(path), num_properties=num_properties, random_seed=random_seed,
+                                 city=city.strip(), neighborhood=neighborhood.strip(), **settings)
 
 
 def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
@@ -113,7 +132,8 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                           assigned_ratio: float = 0.4, service_time_variation: int = 0,
                           speed_profile: Optional[list[tuple[int, float]]] = None,
                           working_hours: tuple[int, int] = (0, 540),
-                          start_at_homes: bool = False, city: str = DEFAULT_CITY) -> dict[str, Any]:
+                          start_at_homes: bool = False, city: str = DEFAULT_CITY,
+                          neighborhood: Optional[str] = None) -> dict[str, Any]:
     """
     Samples listings from the real catalog and builds the instance every model reads.
 
@@ -136,23 +156,45 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
         working_hours (tuple[int, int]): Start and regular end of every broker's working day.
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
         city (str): City the sample is drawn from.
+        neighborhood (Optional[str]): Neighborhood the sample is drawn from. Required: the
+            solver receives only this neighborhood of this city.
 
     Returns:
         dict[str, Any]: The instance payload of generate_wsrp_instance, plus 'listings'.
 
     Raises:
-        ValueError: If the file is missing columns or is smaller than the requested sample.
+        ValueError: If the neighborhood is missing, the file is missing columns, or the
+            neighborhood has fewer listings than the requested sample.
     """
-    catalog = load_real_catalog(path, city=city)
+    if not neighborhood or not str(neighborhood).strip():
+        raise ValueError(
+            "A real instance needs a neighborhood. "
+            "The full catalog is too large for the solver, and a broker does not travel between cities."
+        )
+
+    neighborhood = neighborhood.strip()
+    catalog = load_real_catalog(path, city=city, neighborhood=neighborhood)
     if num_properties < 1:
         raise ValueError("num_properties must be at least 1.")
     if num_properties > len(catalog):
-        raise ValueError(f"The catalog has {len(catalog)} listings in {city}, fewer than {num_properties}.")
+        raise ValueError(
+            f"{neighborhood}, {city} has {len(catalog)} listings, fewer than {num_properties}."
+        )
+
+    project_logger.info(
+        f"Sampling {num_properties} of {len(catalog)} listings in {neighborhood}, {city}."
+    )
 
     rng = np.random.default_rng(random_seed)
     chosen = catalog.iloc[rng.choice(len(catalog), size=num_properties, replace=False)].reset_index(drop=True)
 
-    property_coordinates = [_project(row.lat, row.lon) for row in chosen.itertuples(index=False)]
+    # Keep kilometer distances, and sit the neighborhood in the middle of the map the
+    # homes are drawn on, whichever city the call asked for.
+    raw_coordinates = [_project(row.lat, row.lon) for row in chosen.itertuples(index=False)]
+    center_x = sum(point[0] for point in raw_coordinates) / num_properties
+    center_y = sum(point[1] for point in raw_coordinates) / num_properties
+    property_coordinates = [[round(point[0] - center_x + 50.0, 2), round(point[1] - center_y + 50.0, 2)]
+                            for point in raw_coordinates]
     agency = [round(sum(point[0] for point in property_coordinates) / num_properties, 2),
               round(sum(point[1] for point in property_coordinates) / num_properties, 2)]
     coordinates = [agency, *property_coordinates]
@@ -172,13 +214,15 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                               start_at_homes=start_at_homes)
 
 
-def load_real_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
+def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optional[str] = None) -> pd.DataFrame:
     """
     Reads the real catalog, or the original semicolon export, and keeps the listings a route can visit.
 
     Args:
         path (str): CSV path.
         city (str): City to keep.
+        neighborhood (Optional[str]): Neighborhood to keep inside that city. With None, every
+            neighborhood of the city is returned.
 
     Returns:
         pd.DataFrame: One row per distinct address, in file order, with CATALOG_COLUMNS.
@@ -206,9 +250,9 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
     catalog["total"] = _first_number(catalog["total"]).fillna(catalog["rent"])
 
     usable = (
-        catalog["city"].astype(str).str.strip().eq(city)
-        & catalog["lat"].between(-24.0, -23.2)
-        & catalog["lon"].between(-47.2, -46.2)
+        catalog["city"].astype(str).str.strip().eq(city.strip())
+        & catalog["lat"].between(*BRAZIL_LAT)
+        & catalog["lon"].between(*BRAZIL_LON)
         & catalog["area"].between(MIN_AREA, MAX_AREA)
         & catalog["rent"].gt(0)
         & ~_missing_label(catalog["address"])
@@ -221,13 +265,18 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY) -> pd.DataFrame:
     catalog = catalog.loc[usable, list(CATALOG_COLUMNS)].copy()
     catalog["address"] = catalog["address"].astype(str).str.strip()
     catalog["district"] = catalog["district"].astype(str).str.strip()
+    catalog["city"] = catalog["city"].astype(str).str.strip()
     catalog["type"] = catalog["type"].astype(str).str.strip()
     catalog["_lat_key"] = catalog["lat"].round(5)
     catalog["_lon_key"] = catalog["lon"].round(5)
     catalog = catalog.drop_duplicates(subset=["address", "district", "_lat_key", "_lon_key"], keep="first")
     catalog = catalog.drop(columns=["_lat_key", "_lon_key"])
+    if neighborhood is not None:
+        catalog = catalog.loc[catalog["district"].eq(neighborhood.strip())].reset_index(drop=True)
+        if catalog.empty:
+            raise ValueError(f"No usable listings in {neighborhood.strip()}, {city.strip()}: {path}")
     if catalog.empty:
-        raise ValueError(f"Listing file has no usable rows in {city}: {path}")
+        raise ValueError(f"Listing file has no usable rows in {city.strip()}: {path}")
     return catalog.reset_index(drop=True)
 
 
