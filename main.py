@@ -16,19 +16,22 @@ Usage:
     python main.py --model m8    # Case 8.b: HC-DOMDVRPTW-SD
 
     python main.py --model m7 --properties 12 --brokers 4    # Custom instance size
+
+    python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
 """
 
 import argparse
 from typing import Optional
 
 from src.utils.logger import project_logger
-from src.core.data_generator import generate_wsrp_instance
+from src.core.listings import DATASETS, load_instance
 from src.models import BUILDERS, DEFAULT_SEED, DEFAULT_SEEDS, INSTANCE_SETTINGS
 from src.solvers.engine import solve_model
 from src.utils.parsers import print_results
 
 
-def main(model_version: str, num_properties: int = 5, num_brokers: Optional[int] = None):
+def main(model_version: str, num_properties: int = 5, num_brokers: Optional[int] = None,
+         dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -37,20 +40,25 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[int]
         num_properties (int): Number of properties to visit.
         num_brokers (Optional[int]): Number of brokers |K|, read from M2 onwards. None keeps
             the model's own setting in src.models.INSTANCE_SETTINGS.
+        dataset (str): "synthetic" for the generator, "real" for the real rental catalog.
+        city (Optional[str]): City of the real listings. Required when dataset is "real".
+        neighborhood (Optional[str]): Neighborhood of the real listings, inside that city.
+            Required when dataset is "real".
     """
-    project_logger.info(f"Starting local WSRP optimization pipeline ({model_version})...")
+    project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
     # ---------------------------------------------------------
-    # PHASE 1: Data Ingestion (Mock generation)
+    # PHASE 1: Data Ingestion
     # ---------------------------------------------------------
-    instance_settings = dict(INSTANCE_SETTINGS[model_version])
-    if num_brokers is not None:
-        instance_settings['num_brokers'] = num_brokers
-
-    project_logger.info(f"PHASE 1: Ingesting dataset ({num_properties} properties + 1 Depot, "
-                        f"{instance_settings.get('num_brokers', 1)} brokers)...")
+    brokers = num_brokers if num_brokers is not None else INSTANCE_SETTINGS[model_version].get('num_brokers', 1)
+    project_logger.info(f"PHASE 1: Ingesting {dataset} dataset ({num_properties} properties + 1 Depot, "
+                        f"{brokers} brokers)...")
     random_seed = DEFAULT_SEEDS.get(model_version, DEFAULT_SEED)
-    data_payload = generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **instance_settings)
+    data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
+                                 num_brokers=num_brokers, city=city, neighborhood=neighborhood)
+    for listing in data_payload.get('listings', []):
+        project_logger.info(f"  node {listing['node']}: {listing['address']}, {listing['district']} "
+                            f"({listing['area']:.0f} m², {listing['type']})")
     project_logger.info(f"Dataset loaded. Total nodes: {data_payload['num_nodes']}")
 
     # ---------------------------------------------------------
@@ -90,5 +98,15 @@ if __name__ == "__main__":
                         help="Number of properties to visit (default: 5)")
     parser.add_argument('--brokers', type=int, default=None,
                         help="Number of brokers, read from M2 onwards (default: the model's own setting)")
+    parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
+                        help="Instance source: the synthetic generator, or the real rental catalog of a "
+                             "Brazilian real estate company (default: synthetic)")
+    parser.add_argument('--city', default=None,
+                        help="City of the real listings. Required with --dataset real")
+    parser.add_argument('--neighborhood', default=None,
+                        help="Neighborhood of the real listings, inside --city. Required with --dataset real")
     args = parser.parse_args()
-    main(args.model, num_properties=args.properties, num_brokers=args.brokers)
+    if args.dataset == 'real' and (not args.city or not args.neighborhood):
+        parser.error("--dataset real requires --city and --neighborhood")
+    main(args.model, num_properties=args.properties, num_brokers=args.brokers, dataset=args.dataset,
+         city=args.city, neighborhood=args.neighborhood)
