@@ -34,7 +34,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            start_at_homes: bool = False, days_off: int = 0,
                            split_shifts: bool = False,
                            lunch_break: Optional[tuple[int, int, int]] = None,
-                           max_day_length: Optional[int] = None) -> dict[str, Any]:
+                           max_day_length: Optional[int] = None,
+                           graph: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -68,6 +69,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             the models where every broker must break for lunch. Not used with split_shifts.
         max_day_length (Optional[int]): Longest day a broker of the hidden schedule may work, in
             minutes, for the models that limit it. Not used with split_shifts.
+        graph (Optional[dict[str, Any]]): Nodes to visit instead of the random 100x100 map, with
+            'num_nodes' (num_properties + 1), 'coordinates' and 'distance_matrix', e.g. real
+            listings. Every other feature is still generated.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -84,11 +88,17 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M8.
 
     Raises:
-        ValueError: If the visits don't fit in the shifts, or in the longest working day.
+        ValueError: If the visits don't fit in the shifts, or in the longest working day, or
+            the graph does not have num_properties + 1 nodes.
     """
     num_nodes = num_properties + 1
 
-    data_payload = _generate_graph(num_nodes, random_seed)
+    if graph is None:
+        data_payload = _generate_graph(num_nodes, random_seed)
+    elif graph['num_nodes'] != num_nodes:
+        raise ValueError(f"The graph has {graph['num_nodes']} nodes, not {num_nodes}.")
+    else:
+        data_payload = dict(graph)
     data_payload['num_brokers'] = num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
