@@ -10,7 +10,7 @@ from src.models.model_3 import build_model_m3
 from src.models.model_4 import build_model_m4
 from src.models.model_5 import build_model_m5
 from src.models.model_6 import build_model_m6
-from src.models.model_7 import build_model_m7
+from src.models.model_7 import LUNCH_DURATION, build_model_m7
 
 BUILDERS = {
     'm0': build_model_m0,  # Case 1: TSP
@@ -41,5 +41,6 @@ INSTANCE_SETTINGS = {
     'm6': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': RUSH_HOURS},  # Case 7: more brokers than needed, to minimize the fleet
     'm7': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
-           'speed_profile': NORMAL_SPEED, 'start_at_homes': True},  # Case 8.a: own homes, 08:00 to 17:00 days
+           'speed_profile': NORMAL_SPEED, 'start_at_homes': True,
+           'break_minutes': LUNCH_DURATION},  # Case 8.a: own homes, 08:00 to 17:00 days with lunch
 }

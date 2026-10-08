@@ -9,7 +9,7 @@ Description: Single point of generation of synthetic, reproducible instances for
 
 import math
 import numpy as np
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 # Random stream of each feature. The graph uses the plain seed; every other feature
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
@@ -18,22 +18,29 @@ ASSIGNMENTS_STREAM = 2
 SERVICE_TIMES_STREAM = 3
 HOMES_STREAM = 4
 
+# num_brokers value that sizes the fleet from the instance instead of fixing it.
+AUTO_BROKERS = "auto"
+# Brokers an AUTO_BROKERS fleet adds to the hidden schedule's, for the rules the schedule
+# ignores, such as the lunch window. Each extra broker enlarges the model and slows the proof.
+SPARE_BROKERS = 1
 
-def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
+
+def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: Union[int, str] = 1,
                            travel_time: int = 30, service_time: int = 60, horizon: int = 600,
                            fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
                            assigned_ratio: float = 0.4, service_time_variation: int = 0,
                            speed_profile: Optional[list[tuple[int, float]]] = None,
                            working_hours: tuple[int, int] = (0, 540),
-                           start_at_homes: bool = False) -> dict[str, Any]:
+                           start_at_homes: bool = False, break_minutes: int = 0) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
     Args:
         num_properties (int): The number of properties to be visited.
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
-        num_brokers (int): Number of brokers |K|. The hidden schedule behind the time windows
-            is split among them, so with more than one broker the visits may overlap.
+        num_brokers (Union[int, str]): Number of brokers |K|. The hidden schedule behind the
+            time windows is split among them, so with more than one broker the visits may
+            overlap. AUTO_BROKERS sizes it from the instance: see _complete_instance.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
         horizon (int): Target length of the working day over which the visits are spread, in
@@ -50,6 +57,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             in minutes (e.g. (0, 540) = 08:00 to 17:00).
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home
             instead of the agency, for the models where the brokers start the day at home.
+        break_minutes (int): Minutes of each working day no visit can use, such as lunch.
+            Only read when num_brokers is AUTO_BROKERS.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -63,6 +72,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'period_starts', 'travel_times': M5 onwards.
             - 'home_coordinates', 'home_distances', 'home_travel_times': M7 onwards.
             - 'shift_start', 'shift_end': M7.
+            - 'schedule_brokers': brokers the hidden schedule is split among (<= num_brokers).
     """
     num_nodes = num_properties + 1
 
@@ -73,23 +83,31 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                               travel_time=travel_time, service_time=service_time, horizon=horizon,
                               fixed_ratio=fixed_ratio, window_width=window_width, assigned_ratio=assigned_ratio,
                               speed_profile=speed_profile, working_hours=working_hours,
-                              start_at_homes=start_at_homes)
+                              start_at_homes=start_at_homes, break_minutes=break_minutes)
 
 
-def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_brokers: int, travel_time: int,
-                       service_time: int, horizon: int, fixed_ratio: float, window_width: tuple[int, int],
-                       assigned_ratio: float, speed_profile: Optional[list[tuple[int, float]]],
-                       working_hours: tuple[int, int], start_at_homes: bool,
-                       home_coordinates: Optional[list[list[float]]] = None) -> dict[str, Any]:
+def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_brokers: Union[int, str],
+                       travel_time: int, service_time: int, horizon: int, fixed_ratio: float,
+                       window_width: tuple[int, int], assigned_ratio: float,
+                       speed_profile: Optional[list[tuple[int, float]]], working_hours: tuple[int, int],
+                       start_at_homes: bool, home_coordinates: Optional[list[list[float]]] = None,
+                       break_minutes: int = 0) -> dict[str, Any]:
     """
     Fills travel times, homes and a feasible hidden schedule on a graph that already
     has coordinates, a distance matrix and the visit durations.
+
+    With num_brokers = AUTO_BROKERS, the hidden schedule goes to the fewest brokers whose
+    busiest day of travel and visits fits the working hours minus break_minutes, and the
+    fleet adds SPARE_BROKERS to them. The schedule is a plan those brokers can carry out,
+    so the minimum fleet is at most that many; the spares absorb the rules the schedule
+    ignores, such as the lunch window. Fleet-minimizing models then use only the brokers
+    they need.
 
     Args:
         data_payload (dict[str, Any]): Instance with 'num_nodes', 'coordinates',
             'distance_matrix' and 'service_times' already set.
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
-        num_brokers (int): Number of brokers |K|.
+        num_brokers (Union[int, str]): Number of brokers |K|, or AUTO_BROKERS.
         travel_time (int): Constant travel time T, used when there is no speed profile.
         service_time (int): Constant visit duration S kept for the models that read it.
         horizon (int): Target length of the working day, in minutes.
@@ -102,16 +120,21 @@ def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_broke
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
         home_coordinates (Optional[list[list[float]]]): (x, y) of each broker's home, in the
             same units as the node coordinates. With None, each home is drawn on the 100x100 map.
+            With AUTO_BROKERS, one home per property, of which the fleet keeps the first ones.
+        break_minutes (int): Minutes of each working day no visit can use, such as lunch.
 
     Returns:
         dict[str, Any]: The same payload, with the keys every model reads filled in.
     """
     num_nodes = data_payload['num_nodes']
-    data_payload['num_brokers'] = num_brokers
+    auto = num_brokers == AUTO_BROKERS
+    # Homes are drawn one broker after another, so the first homes of a larger pool are
+    # the homes of a smaller fleet with the same seed
+    pool = num_nodes - 1 if auto else num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
-    data_payload.update(_generate_homes(random_seed, num_brokers, data_payload['coordinates'], travel_time,
+    data_payload.update(_generate_homes(random_seed, pool, data_payload['coordinates'], travel_time,
                                         speed_profile, home_coordinates))
 
     # The hidden schedule assumes the slowest period on every trip, so it stays feasible
@@ -120,9 +143,22 @@ def _complete_instance(data_payload: dict[str, Any], random_seed: int, num_broke
     if start_at_homes:
         first_legs = np.max(data_payload['home_travel_times'], axis=0).tolist()
     else:
-        first_legs = [leg_times[0]] * num_brokers
+        first_legs = [leg_times[0]] * pool
 
-    time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
+    if auto:
+        schedule_brokers = _schedule_brokers(num_nodes, random_seed, leg_times, first_legs,
+                                             data_payload['service_times'],
+                                             working_hours[1] - working_hours[0] - break_minutes)
+        num_brokers = min(pool, schedule_brokers + SPARE_BROKERS)
+        data_payload['home_coordinates'] = data_payload['home_coordinates'][:num_brokers]
+        data_payload['home_distances'] = data_payload['home_distances'][:num_brokers]
+        data_payload['home_travel_times'] = [period[:num_brokers] for period in data_payload['home_travel_times']]
+    else:
+        schedule_brokers = num_brokers
+    data_payload['num_brokers'] = num_brokers
+    data_payload['schedule_brokers'] = schedule_brokers
+
+    time_windows = _generate_time_windows(num_nodes, random_seed, schedule_brokers, leg_times, first_legs,
                                           data_payload['service_times'], horizon, fixed_ratio, window_width)
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
@@ -304,9 +340,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
     def leg(broker, previous, node):
         return first_legs[broker - 1][node] if previous is None else leg_times[previous][node]
 
-    workloads = [sum(leg(broker, previous, node) + service_times[node]
-                     for previous, node in zip([None, *share[:-1]], share))
-                 for broker, share in enumerate(broker_shares, start=1)]
+    workloads = _workloads(broker_shares, leg_times, first_legs, service_times)
     horizon = max(horizon, max(workloads))
 
     # Each broker's slack in the day is spread as idle gaps between its visits
@@ -353,6 +387,63 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
         'fixed_visits': fixed_visits,
         'reference_broker': reference_broker
     }
+
+
+def _workloads(broker_shares: list[np.ndarray], leg_times: list[list[int]], first_legs: list[list[int]],
+               service_times: list[int]) -> list[int]:
+    """
+    Minutes of travel and visits of each broker's share of the hidden schedule, idle time aside.
+
+    Args:
+        broker_shares (list[np.ndarray]): Visits of each broker, in visiting order.
+        leg_times (list[list[int]]): Travel time of each trip, in minutes.
+        first_legs (list[list[int]]): Travel time of each broker's first trip, to each node.
+        service_times (list[int]): Duration s_i of the visit at each node, in minutes.
+
+    Returns:
+        list[int]: The workload of each broker, in the order of broker_shares.
+    """
+    workloads = []
+    for broker, share in enumerate(broker_shares, start=1):
+        previous = None
+        workload = 0
+        for node in share:
+            workload += (first_legs[broker - 1][node] if previous is None else leg_times[previous][node])
+            workload += service_times[node]
+            previous = node
+        workloads.append(workload)
+    return workloads
+
+
+def _schedule_brokers(num_nodes: int, random_seed: int, leg_times: list[list[int]], first_legs: list[list[int]],
+                      service_times: list[int], day_capacity: int) -> int:
+    """
+    Fewest brokers among whom the hidden schedule fits a working day.
+
+    Takes the visiting order _generate_time_windows draws with the same seed and splits it
+    among 1, 2, ... brokers until the busiest one's travel and visits fit day_capacity.
+    One broker per property is the most the split can use.
+
+    Args:
+        num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
+        random_seed (int): Seed of the hidden schedule.
+        leg_times (list[list[int]]): Travel time of each trip, in minutes.
+        first_legs (list[list[int]]): Travel time of each broker's first trip, to each node,
+            with one row per broker that may join the split.
+        service_times (list[int]): Duration s_i of the visit at each node, in minutes.
+        day_capacity (int): Minutes of a working day available for travel and visits.
+
+    Returns:
+        int: The number of brokers the hidden schedule is split among.
+    """
+    rng = np.random.default_rng([random_seed, TIME_WINDOWS_STREAM])
+    reference_order = rng.permutation(np.arange(1, num_nodes))
+    num_properties = num_nodes - 1
+    for brokers in range(1, num_properties + 1):
+        workloads = _workloads(np.array_split(reference_order, brokers), leg_times, first_legs, service_times)
+        if max(workloads) <= day_capacity:
+            return brokers
+    return num_properties
 
 
 def _generate_assignments(num_nodes: int, random_seed: int, reference_broker: list[int],

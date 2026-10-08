@@ -19,12 +19,12 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
 
 import math
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
 
-from src.core.data_generator import HOMES_STREAM, _complete_instance, generate_wsrp_instance
+from src.core.data_generator import AUTO_BROKERS, HOMES_STREAM, _complete_instance, generate_wsrp_instance
 from src.models import INSTANCE_SETTINGS
 from src.utils.logger import project_logger
 
@@ -93,7 +93,8 @@ CATALOG_COLUMNS = ("id", "address", "district", "city", "lat", "lon", "area", "b
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
                   catalog_path: Optional[str] = None, city: Optional[str] = None,
-                  neighborhood: Optional[str] = None) -> dict[str, Any]:
+                  neighborhood: Optional[str] = None,
+                  num_brokers: Optional[Union[int, str]] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
 
@@ -107,18 +108,29 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         city (Optional[str]): City of a real instance. Required when dataset is "real".
         neighborhood (Optional[str]): Neighborhood of a real instance. Required when dataset is
             "real". The sample is drawn only from this neighborhood of this city.
+        num_brokers (Optional[Union[int, str]]): Brokers of the instance, overriding the
+            model's INSTANCE_SETTINGS. AUTO_BROKERS sizes the fleet from the visits. Only for
+            the models with several brokers (m2 onwards).
 
     Returns:
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
 
     Raises:
-        ValueError: If dataset is unknown, a real call omits the city or the neighborhood,
-            or the catalog cannot supply the sample.
+        ValueError: If dataset is unknown, num_brokers is invalid or set for a single-broker
+            model, a real call omits the city or the neighborhood, or the catalog cannot
+            supply the sample.
     """
     if dataset not in DATASETS:
         raise ValueError(f"dataset must be one of: {', '.join(DATASETS)}.")
 
     settings = INSTANCE_SETTINGS[model_version]
+    if num_brokers is not None:
+        if "num_brokers" not in settings:
+            raise ValueError(f"{model_version} routes a single broker; num_brokers applies from m2 onwards.")
+        if num_brokers != AUTO_BROKERS and (isinstance(num_brokers, bool) or not isinstance(num_brokers, int)
+                                            or num_brokers < 1):
+            raise ValueError(f"num_brokers must be a positive integer or {AUTO_BROKERS!r}.")
+        settings = {**settings, "num_brokers": num_brokers}
     if dataset == "synthetic":
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **settings)
 
@@ -137,13 +149,13 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
                                  city=city.strip(), neighborhood=neighborhood.strip(), **settings)
 
 
-def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
-                          travel_time: int = 30, service_time: int = 60, horizon: int = 600,
-                          fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
+def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int = 42,
+                          num_brokers: Union[int, str] = 1, travel_time: int = 30, service_time: int = 60,
+                          horizon: int = 600, fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
                           assigned_ratio: float = 0.4, service_time_variation: int = 0,
                           speed_profile: Optional[list[tuple[int, float]]] = None,
                           working_hours: tuple[int, int] = (0, 540),
-                          start_at_homes: bool = False, city: str = DEFAULT_CITY,
+                          start_at_homes: bool = False, break_minutes: int = 0, city: str = DEFAULT_CITY,
                           neighborhood: Optional[str] = None) -> dict[str, Any]:
     """
     Samples listings from the real catalog and builds the instance every model reads.
@@ -152,7 +164,8 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
         path (str): Semicolon-separated CSV, either the original export or the cleaned catalog.
         num_properties (int): How many listings become visits.
         random_seed (int): Seed for the sample and for the hidden schedule.
-        num_brokers (int): Number of brokers |K|.
+        num_brokers (Union[int, str]): Number of brokers |K|, or AUTO_BROKERS to size the
+            fleet from the visits.
         travel_time (int): Constant travel time T, used when there is no speed profile.
         service_time (int): Visit duration S, in minutes, used as-is when there is no variation
             and as the middle of the range otherwise.
@@ -166,6 +179,8 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
             speed in distance units per minute). With None, every trip takes T.
         working_hours (tuple[int, int]): Start and regular end of every broker's working day.
         start_at_homes (bool): Whether each broker of the hidden schedule leaves his own home.
+        break_minutes (int): Minutes of each working day no visit can use, such as lunch.
+            Only read when num_brokers is AUTO_BROKERS.
         city (str): City the sample is drawn from.
         neighborhood (Optional[str]): Neighborhood the sample is drawn from. Required: the
             solver receives only this neighborhood of this city. Broker homes are drawn
@@ -211,8 +226,10 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
     house_lon = [row.lon for row in rows]
     origin_lat, origin_lon, km_per_degree_lon = _map_frame(house_lat, house_lon)
     coordinates = _house_graph(house_lat, house_lon, origin_lat, origin_lon, km_per_degree_lon)
-    project_logger.info(f"Placing {num_brokers} broker homes inside the polygon of {city}.")
-    homes = _broker_homes(random_seed, city_catalog["lat"].tolist(), city_catalog["lon"].tolist(), num_brokers,
+    # An automatic fleet keeps the first homes of one per property; see _complete_instance
+    home_pool = num_properties if num_brokers == AUTO_BROKERS else num_brokers
+    project_logger.info(f"Placing {home_pool} broker homes inside the polygon of {city}.")
+    homes = _broker_homes(random_seed, city_catalog["lat"].tolist(), city_catalog["lon"].tolist(), home_pool,
                           origin_lat, origin_lon, km_per_degree_lon)
 
     data_payload = {
@@ -226,7 +243,7 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
                               travel_time=travel_time, service_time=service_time, horizon=horizon,
                               fixed_ratio=fixed_ratio, window_width=window_width, assigned_ratio=assigned_ratio,
                               speed_profile=speed_profile, working_hours=working_hours,
-                              start_at_homes=start_at_homes, home_coordinates=homes)
+                              start_at_homes=start_at_homes, home_coordinates=homes, break_minutes=break_minutes)
 
 
 def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optional[str] = None) -> pd.DataFrame:
