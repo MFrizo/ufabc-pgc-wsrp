@@ -39,11 +39,9 @@ INSTANCE_SETTINGS = {
     'm3': {'num_brokers': 2, 'fixed_ratio': 1.0},  # Case 4: same, some visits with a broker
     'm4': {'num_brokers': 2, 'fixed_ratio': 1.0, 'service_time_variation': 30},  # Case 5: 30 to 90 min visits
     'm5': {'num_brokers': 2, 'fixed_ratio': 1.0, 'service_time_variation': 30,
-           'speed_profile': RUSH_HOURS,  # Case 6: travel time by period of the day
-           'max_routing_arcs': 450},  # Each extra broker about doubles its proof time
+           'speed_profile': RUSH_HOURS},  # Case 6: travel time by period of the day
     'm6': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
-           'speed_profile': RUSH_HOURS,  # Case 7: more brokers than needed, to minimize the fleet
-           'max_routing_arcs': 4000},  # 20 properties: 7 s with 9 brokers, 24 s with 11
+           'speed_profile': RUSH_HOURS},  # Case 7: more brokers than needed, to minimize the fleet
     'm7': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'start_at_homes': True,
            'lunch_break': (*LUNCH_WINDOW, LUNCH_DURATION),
