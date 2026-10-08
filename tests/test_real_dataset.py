@@ -31,13 +31,14 @@ class RealDatasetTest(unittest.TestCase):
         data = load_instance("real", "m7", num_properties=5, random_seed=42,
                              city="São Paulo", neighborhood="Moema")
         catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
-        catalog_keys = set(zip(catalog["address"], catalog["district"]))
+        catalog_ids = set(catalog["id"].astype(str))
 
         self.assertEqual(data["num_nodes"], 6)
         self.assertEqual(len(data["listings"]), 5)
         self.assertGreater(len(catalog), 5)
+        self.assertEqual(len({listing["id"] for listing in data["listings"]}), 5)
         for listing in data["listings"]:
-            self.assertIn((listing["address"], listing["district"]), catalog_keys)
+            self.assertIn(listing["id"], catalog_ids)
             self.assertEqual(listing["city"], "São Paulo")
             self.assertEqual(listing["district"], "Moema")
             self.assertGreaterEqual(data["service_times"][listing["node"]], 30)
@@ -110,6 +111,15 @@ class RealDatasetTest(unittest.TestCase):
         self.assertFalse(real["district"].str.strip().str.lower().eq("normal").any())
         self.assertLessEqual(_km_from_city_median(real).max(), MAX_KM_FROM_CITY)
         self.assertGreater(real["city"].nunique(), 1)
+
+    def test_listings_of_one_building_stay_separate(self):
+        raw = pd.read_csv(RAW_REAL_CATALOG, sep=";", low_memory=False)
+        real = pd.read_csv(REAL_CATALOG, sep=";")
+
+        self.assertTrue(real["id"].is_unique)
+        self.assertLessEqual(len(real), raw["listing.id"].nunique())
+        same_point = real.groupby(["address", "district", "lat", "lon"])["id"].nunique()
+        self.assertGreater(same_point.max(), 1)
 
     def test_synthetic_instance_has_no_listings(self):
         data = load_instance("synthetic", "m7", num_properties=5, random_seed=42)

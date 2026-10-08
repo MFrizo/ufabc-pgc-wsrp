@@ -72,6 +72,7 @@ MISSING_LABELS = {"", "normal", "nan", "none", "<na>"}
 
 # Headers of the original semicolon export, mapped to the columns the instance reads.
 EXPORT_RENAME = {
+    "listing.id": "id",
     "listing.address.street": "address",
     "listing.address.neighborhood": "district",
     "listing.address.city": "city",
@@ -86,7 +87,8 @@ EXPORT_RENAME = {
     "listing.address.precision": "precision",
 }
 
-CATALOG_COLUMNS = ("address", "district", "city", "lat", "lon", "area", "bedrooms", "garage", "type", "rent", "total")
+CATALOG_COLUMNS = ("id", "address", "district", "city", "lat", "lon", "area", "bedrooms", "garage", "type", "rent",
+                   "total")
 
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
@@ -238,7 +240,7 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optiona
             neighborhood of the city is returned.
 
     Returns:
-        pd.DataFrame: One row per distinct address, in file order, with CATALOG_COLUMNS.
+        pd.DataFrame: One row per listing id, in file order, with CATALOG_COLUMNS.
 
     Raises:
         ValueError: If a required column is missing or no listing remains.
@@ -262,14 +264,15 @@ def clean_real_catalog(path: str) -> pd.DataFrame:
     Drops the listings without a city or a neighborhood, including the "normal"
     placeholder, the ones without coordinates, outside Brazil or more than
     MAX_KM_FROM_CITY from the median coordinate of their city, and the ones a visit
-    cannot use: no address or type, an implausible area, no rent, no geocode, or a
-    second copy of the same address.
+    cannot use: no address or type, an implausible area, no rent or no geocode. A
+    listing published more than once is kept once, by its id. Apartments that share
+    a building, and therefore an address, stay separate listings.
 
     Args:
         path (str): Semicolon-separated CSV, either the original export or the cleaned catalog.
 
     Returns:
-        pd.DataFrame: One row per distinct address, in file order, with CATALOG_COLUMNS.
+        pd.DataFrame: One row per listing id, in file order, with CATALOG_COLUMNS.
 
     Raises:
         ValueError: If a required column is missing.
@@ -285,6 +288,10 @@ def clean_real_catalog(path: str) -> pd.DataFrame:
         raise ValueError(f"Listing file is missing columns: {', '.join(missing)}.")
 
     catalog = catalog.loc[:, [*CATALOG_COLUMNS, *(["precision"] if "precision" in catalog.columns else [])]].copy()
+    # The export repeats an ad once per property-type search that found it. Apartments of
+    # one building share the street and often the coordinates, so only the id tells two
+    # listings apart.
+    catalog = catalog.drop_duplicates(subset=["id"], keep="first")
     catalog["lat"] = pd.to_numeric(catalog["lat"], errors="coerce")
     catalog["lon"] = pd.to_numeric(catalog["lon"], errors="coerce")
     catalog["area"] = _first_number(catalog["area"])
@@ -316,10 +323,6 @@ def clean_real_catalog(path: str) -> pd.DataFrame:
     catalog["address"] = catalog["address"].astype(str).str.strip()
     catalog["district"] = catalog["district"].astype(str).str.strip()
     catalog["type"] = catalog["type"].astype(str).str.strip()
-    catalog["_lat_key"] = catalog["lat"].round(5)
-    catalog["_lon_key"] = catalog["lon"].round(5)
-    catalog = catalog.drop_duplicates(subset=["address", "district", "_lat_key", "_lon_key"], keep="first")
-    catalog = catalog.drop(columns=["_lat_key", "_lon_key"])
     return catalog.reset_index(drop=True)
 
 
@@ -351,6 +354,7 @@ def _listing_record(node: int, row: Any) -> dict[str, Any]:
     """One sampled listing, tagged with the graph node of its visit."""
     return {
         "node": node,
+        "id": str(row.id),
         "address": row.address,
         "district": row.district,
         "city": row.city,
