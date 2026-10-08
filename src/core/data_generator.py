@@ -25,8 +25,8 @@ FLEET_STREAM = 7
 AUTO_BROKERS = "auto"
 
 # Most routing arcs (brokers x arcs between the nodes) an automatic fleet may give the solver.
-# M2 to M8 prove optimality within seconds up to it; M7 passes a minute at about 8,000.
-MAX_ROUTING_ARCS = 3000
+# M2 to M4, M7 and M8 prove optimality in seconds up to it; M7 passes a minute at about 8,000.
+MAX_ROUTING_ARCS = 5000
 
 # Range of the start and of the end of each broker's shifts, in minutes from 08:00
 MORNING_SHIFT = ((0, 60), (210, 270))           # Starts 08:00 to 09:00, ends 11:30 to 12:30
