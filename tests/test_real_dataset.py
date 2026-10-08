@@ -10,6 +10,7 @@ from src.core.listings import (
     KM_PER_DEGREE_LON,
     MAP_UNITS_PER_KM,
     REAL_CATALOG,
+    _city_points,
     _convex_hull,
     _map_frame,
     _to_map,
@@ -71,24 +72,28 @@ class RealDatasetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_instance("real", "m7", city="São Paulo")
 
-    def test_broker_homes_lie_inside_the_neighborhood(self):
+    def test_broker_homes_lie_inside_the_city(self):
         data = load_instance("real", "m7", num_properties=5, random_seed=42,
                              city="São Paulo", neighborhood="Moema")
-        catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
         origin_lat, origin_lon, km_per_degree_lon = _map_frame(
             [listing["lat"] for listing in data["listings"]],
             [listing["lon"] for listing in data["listings"]],
         )
-        projected = [_to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon)
-                     for lat, lon in zip(catalog["lat"], catalog["lon"])]
-        hull = _convex_hull([(point[0], point[1]) for point in projected])
-        polygon = [list(point) for point in hull]
+
+        def polygon_of(latitudes, longitudes):
+            projected = [_to_map(lat, lon, origin_lat, origin_lon, km_per_degree_lon)
+                         for lat, lon in zip(latitudes, longitudes)]
+            return [list(point) for point in _convex_hull([(point[0], point[1]) for point in projected])]
+
+        city = polygon_of(*_city_points(load_real_catalog(REAL_CATALOG, city="São Paulo")))
+        moema_catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
+        moema = polygon_of(moema_catalog["lat"], moema_catalog["lon"])
 
         self.assertEqual(len(data["home_coordinates"]), 3)
-        self.assertGreater(len(polygon), 2)
-        self.assertFalse(self._inside_polygon([0.0, 0.0], polygon))
+        self.assertGreater(len(city), 2)
         for home in data["home_coordinates"]:
-            self.assertTrue(self._inside_polygon(home, polygon))
+            self.assertTrue(self._inside_polygon(home, city))
+        self.assertTrue(any(not self._inside_polygon(home, moema) for home in data["home_coordinates"]))
 
     def test_synthetic_instance_has_no_listings(self):
         data = load_instance("synthetic", "m7", num_properties=5, random_seed=42)

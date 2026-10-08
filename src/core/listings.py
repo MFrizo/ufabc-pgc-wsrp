@@ -10,8 +10,8 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
              is built from listing.address.point.lat and listing.address.point.lon:
              each edge is the straight-line separation of those two coordinates, on
              the same scale the generator uses. The visit length grows with the
-             usable area. Each broker's home is a latitude and longitude inside the
-             polygon of that neighborhood. Scheduled times and broker assignments
+             usable area. Each broker's home is a random latitude and longitude inside
+             the polygon of the city. Scheduled times and broker assignments
              still come from the hidden schedule, which keeps the instance feasible.
 """
 
@@ -58,6 +58,10 @@ KM_PER_DEGREE_LON = 111.320
 # is 4 units and a speed of 2 units per minute is about 30 km/h. The houses keep that
 # scale; their positions come from the listing coordinates, not from that box.
 MAP_UNITS_PER_KM = 4.0
+
+# Quantiles of latitude and longitude kept for the city polygon. Some listings carry
+# the city's name with coordinates hundreds of kilometers away.
+CITY_QUANTILES = (0.01, 0.99)
 
 # Labels the catalog uses where a value is missing.
 MISSING_LABELS = {"", "normal", "nan", "none", "<na>"}
@@ -159,7 +163,7 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
         city (str): City the sample is drawn from.
         neighborhood (Optional[str]): Neighborhood the sample is drawn from. Required: the
             solver receives only this neighborhood of this city. Broker homes are drawn
-            inside the convex hull of its listings.
+            anywhere inside the city.
 
     Returns:
         dict[str, Any]: The instance payload of generate_wsrp_instance, plus 'listings'.
@@ -175,7 +179,10 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
         )
 
     neighborhood = neighborhood.strip()
-    catalog = load_real_catalog(path, city=city, neighborhood=neighborhood)
+    city_catalog = load_real_catalog(path, city=city)
+    catalog = city_catalog.loc[city_catalog["district"].eq(neighborhood)].reset_index(drop=True)
+    if catalog.empty:
+        raise ValueError(f"No usable listings in {neighborhood}, {city.strip()}: {path}")
     if num_properties < 1:
         raise ValueError("num_properties must be at least 1.")
     if num_properties > len(catalog):
@@ -193,16 +200,14 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
 
     # listing.address.point.lat / listing.address.point.lon, renamed to lat / lon.
     # The agency sits at the centroid of the sampled houses. Broker homes are other
-    # points of the same projection, drawn inside the neighborhood's polygon.
+    # points of the same projection, drawn inside the city's polygon.
     house_lat = [row.lat for row in rows]
     house_lon = [row.lon for row in rows]
     origin_lat, origin_lon, km_per_degree_lon = _map_frame(house_lat, house_lon)
     coordinates = _house_graph(house_lat, house_lon, origin_lat, origin_lon, km_per_degree_lon)
-    project_logger.info(
-        f"Placing {num_brokers} broker homes inside the polygon of {neighborhood}, {city}."
-    )
-    homes = _broker_homes(random_seed, catalog["lat"].tolist(), catalog["lon"].tolist(), num_brokers,
-                          origin_lat, origin_lon, km_per_degree_lon)
+    city_lat, city_lon = _city_points(city_catalog)
+    project_logger.info(f"Placing {num_brokers} broker homes inside the polygon of {city}.")
+    homes = _broker_homes(random_seed, city_lat, city_lon, num_brokers, origin_lat, origin_lon, km_per_degree_lon)
 
     data_payload = {
         "num_nodes": num_properties + 1,
@@ -362,20 +367,31 @@ def _house_graph(latitudes: list[float], longitudes: list[float], origin_lat: fl
     return [agency, *houses]
 
 
+def _city_points(city_catalog: pd.DataFrame) -> tuple[list[float], list[float]]:
+    """
+    listing.address.point.lat and listing.address.point.lon of the city's listings
+    that fall between CITY_QUANTILES on both axes.
+    """
+    low, high = CITY_QUANTILES
+    lat_low, lat_high = city_catalog["lat"].quantile([low, high])
+    lon_low, lon_high = city_catalog["lon"].quantile([low, high])
+    inside = city_catalog["lat"].between(lat_low, lat_high) & city_catalog["lon"].between(lon_low, lon_high)
+    return city_catalog.loc[inside, "lat"].tolist(), city_catalog.loc[inside, "lon"].tolist()
+
+
 def _broker_homes(random_seed: int, latitudes: list[float], longitudes: list[float], num_brokers: int,
                   origin_lat: float, origin_lon: float, km_per_degree_lon: float) -> list[list[float]]:
     """
-    (x, y) of each broker's home, drawn inside the neighborhood polygon.
+    (x, y) of each broker's home, drawn inside the city polygon.
 
     The polygon is the convex hull of listing.address.point.lat and
-    listing.address.point.lon for every listing in the city and neighborhood of
-    the call. Each home is a uniform point of that polygon, then placed with the
-    same projection as the houses.
+    listing.address.point.lon for the city's listings. Each home is a uniform
+    point of that polygon, then placed with the same projection as the houses.
 
     Args:
         random_seed (int): Seed of the draw.
-        latitudes (list[float]): listing.address.point.lat of every listing in the region.
-        longitudes (list[float]): listing.address.point.lon of every listing in the region.
+        latitudes (list[float]): listing.address.point.lat of the listings that outline the city.
+        longitudes (list[float]): listing.address.point.lon of the listings that outline the city.
         num_brokers (int): How many homes to place.
         origin_lat (float): Latitude the projection measures north from.
         origin_lon (float): Longitude the projection measures east from.
