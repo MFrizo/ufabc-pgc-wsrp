@@ -14,7 +14,7 @@ Usage:
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
     python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema
-    python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema --catalog-path "/path/to/listings.csv"
+    python main.py --model m7 --dataset real --city "Rio de Janeiro" --neighborhood Copacabana --catalog-path data/raw_real.csv.gz
 """
 
 import argparse
@@ -99,8 +99,9 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42,
                         help="Seed of the sample and of the hidden schedule (default: 42)")
     parser.add_argument('--catalog-path', default=None,
-                        help="CSV of real listings when --dataset real. Defaults to data/real.csv. "
-                             "The original semicolon export is accepted.")
+                        help="CSV of real listings when --dataset real. Defaults to data/real.csv, "
+                             "the cleaned catalog. data/raw_real.csv.gz, the original export, is "
+                             "accepted and cleaned the same way.")
     parser.add_argument('--city', default=None,
                         help="City kept when --dataset real. Required. A broker does not travel to another city.")
     parser.add_argument('--neighborhood', default=None,

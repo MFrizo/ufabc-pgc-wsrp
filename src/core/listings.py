@@ -4,9 +4,11 @@ Description: Builds a WSRP instance from a real rental catalog, as an alternativ
              synthetic generator. The catalog is a snapshot of a Brazilian real estate
              company, published at
              https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
-             The file shipped here is the São Paulo slice. Each call keeps one city and
-             one neighborhood: the national file is too large for the solver, and a
-             broker does not travel from one city to another. The graph of the houses
+             data/raw_real.csv.gz is that export as published. data/real.csv is its
+             cleaned version, the one the instances read: every listing has a city,
+             a neighborhood and coordinates inside its own city. Each call keeps one
+             city and one neighborhood: the national file is too large for the solver,
+             and a broker does not travel from one city to another. The graph of the houses
              is built from listing.address.point.lat and listing.address.point.lon:
              each edge is the straight-line separation of those two coordinates, on
              the same scale the generator uses. The visit length grows with the
@@ -30,7 +32,8 @@ from src.utils.logger import project_logger
 # https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent
 REAL_CATALOG_SOURCE = "https://www.kaggle.com/datasets/maverickjpa/brazilian-real-estate-to-rent"
 
-# Cleaned São Paulo rows of that snapshot, shipped with the repo.
+# That snapshot as published, and its cleaned version, both shipped with the repo.
+RAW_REAL_CATALOG = Path(__file__).resolve().parents[2] / "data" / "raw_real.csv.gz"
 REAL_CATALOG = Path(__file__).resolve().parents[2] / "data" / "real.csv"
 
 DATASETS = ("synthetic", "real")
@@ -59,9 +62,10 @@ KM_PER_DEGREE_LON = 111.320
 # scale; their positions come from the listing coordinates, not from that box.
 MAP_UNITS_PER_KM = 4.0
 
-# Quantiles of latitude and longitude kept for the city polygon. Some listings carry
-# the city's name with coordinates hundreds of kilometers away.
-CITY_QUANTILES = (0.01, 0.99)
+# Farthest a listing may sit from the median coordinate of its own city. The snapshot's
+# real listings stay within 40 km (Guaratiba, in Rio); the next ones are 52 km to
+# 1,164 km away, carrying the city's name with another place's coordinates.
+MAX_KM_FROM_CITY = 50.0
 
 # Labels the catalog uses where a value is missing.
 MISSING_LABELS = {"", "normal", "nan", "none", "<na>"}
@@ -96,8 +100,8 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         model_version (str): Key of src.models.BUILDERS. Selects that model's generator settings.
         num_properties (int): Number of properties in the instance.
         random_seed (int): Seed of the sample and of the hidden schedule.
-        catalog_path (Optional[str]): Real-listings CSV. Defaults to the São Paulo extract of
-            REAL_CATALOG_SOURCE shipped in the repo. The original semicolon export is accepted too.
+        catalog_path (Optional[str]): Real-listings CSV. Defaults to REAL_CATALOG, the cleaned
+            version of REAL_CATALOG_SOURCE. RAW_REAL_CATALOG is accepted too, and cleaned the same way.
         city (Optional[str]): City of a real instance. Required when dataset is "real".
         neighborhood (Optional[str]): Neighborhood of a real instance. Required when dataset is
             "real". The sample is drawn only from this neighborhood of this city.
@@ -143,7 +147,7 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
     Samples listings from the real catalog and builds the instance every model reads.
 
     Args:
-        path (str): Semicolon-separated CSV, either the original export or the cleaned extract.
+        path (str): Semicolon-separated CSV, either the original export or the cleaned catalog.
         num_properties (int): How many listings become visits.
         random_seed (int): Seed for the sample and for the hidden schedule.
         num_brokers (int): Number of brokers |K|.
@@ -205,9 +209,9 @@ def instance_from_dataset(path: str, num_properties: int = 5, random_seed: int =
     house_lon = [row.lon for row in rows]
     origin_lat, origin_lon, km_per_degree_lon = _map_frame(house_lat, house_lon)
     coordinates = _house_graph(house_lat, house_lon, origin_lat, origin_lon, km_per_degree_lon)
-    city_lat, city_lon = _city_points(city_catalog)
     project_logger.info(f"Placing {num_brokers} broker homes inside the polygon of {city}.")
-    homes = _broker_homes(random_seed, city_lat, city_lon, num_brokers, origin_lat, origin_lon, km_per_degree_lon)
+    homes = _broker_homes(random_seed, city_catalog["lat"].tolist(), city_catalog["lon"].tolist(), num_brokers,
+                          origin_lat, origin_lon, km_per_degree_lon)
 
     data_payload = {
         "num_nodes": num_properties + 1,
@@ -239,6 +243,37 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optiona
     Raises:
         ValueError: If a required column is missing or no listing remains.
     """
+    catalog = clean_real_catalog(path)
+    catalog = catalog.loc[catalog["city"].eq(city.strip())]
+    if neighborhood is not None:
+        catalog = catalog.loc[catalog["district"].eq(neighborhood.strip())].reset_index(drop=True)
+        if catalog.empty:
+            raise ValueError(f"No usable listings in {neighborhood.strip()}, {city.strip()}: {path}")
+    if catalog.empty:
+        raise ValueError(f"Listing file has no usable rows in {city.strip()}: {path}")
+    return catalog.reset_index(drop=True)
+
+
+def clean_real_catalog(path: str) -> pd.DataFrame:
+    """
+    Cleans the real catalog of every city. REAL_CATALOG is this function applied to
+    RAW_REAL_CATALOG; running it again on REAL_CATALOG keeps every row.
+
+    Drops the listings without a city or a neighborhood, including the "normal"
+    placeholder, the ones without coordinates, outside Brazil or more than
+    MAX_KM_FROM_CITY from the median coordinate of their city, and the ones a visit
+    cannot use: no address or type, an implausible area, no rent, no geocode, or a
+    second copy of the same address.
+
+    Args:
+        path (str): Semicolon-separated CSV, either the original export or the cleaned catalog.
+
+    Returns:
+        pd.DataFrame: One row per distinct address, in file order, with CATALOG_COLUMNS.
+
+    Raises:
+        ValueError: If a required column is missing.
+    """
     catalog = pd.read_csv(path, sep=";", low_memory=False)
     # The export's own "type" column is the publication tier (premium), not the property kind.
     if "listing.unitTypes" in catalog.columns and "type" in catalog.columns:
@@ -258,14 +293,20 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optiona
     catalog["rent"] = _first_number(catalog["rent"])
     catalog["total"] = _first_number(catalog["total"]).fillna(catalog["rent"])
 
-    usable = (
-        catalog["city"].astype(str).str.strip().eq(city.strip())
+    placed = (
+        ~_missing_label(catalog["city"])
+        & ~_missing_label(catalog["district"])
         & catalog["lat"].between(*BRAZIL_LAT)
         & catalog["lon"].between(*BRAZIL_LON)
-        & catalog["area"].between(MIN_AREA, MAX_AREA)
+    )
+    catalog = catalog.loc[placed].copy()
+    catalog["city"] = catalog["city"].astype(str).str.strip()
+    catalog = catalog.loc[_km_from_city_median(catalog).le(MAX_KM_FROM_CITY)]
+
+    usable = (
+        catalog["area"].between(MIN_AREA, MAX_AREA)
         & catalog["rent"].gt(0)
         & ~_missing_label(catalog["address"])
-        & ~_missing_label(catalog["district"])
         & ~_missing_label(catalog["type"])
     )
     if "precision" in catalog.columns:
@@ -274,19 +315,36 @@ def load_real_catalog(path: str, city: str = DEFAULT_CITY, neighborhood: Optiona
     catalog = catalog.loc[usable, list(CATALOG_COLUMNS)].copy()
     catalog["address"] = catalog["address"].astype(str).str.strip()
     catalog["district"] = catalog["district"].astype(str).str.strip()
-    catalog["city"] = catalog["city"].astype(str).str.strip()
     catalog["type"] = catalog["type"].astype(str).str.strip()
     catalog["_lat_key"] = catalog["lat"].round(5)
     catalog["_lon_key"] = catalog["lon"].round(5)
     catalog = catalog.drop_duplicates(subset=["address", "district", "_lat_key", "_lon_key"], keep="first")
     catalog = catalog.drop(columns=["_lat_key", "_lon_key"])
-    if neighborhood is not None:
-        catalog = catalog.loc[catalog["district"].eq(neighborhood.strip())].reset_index(drop=True)
-        if catalog.empty:
-            raise ValueError(f"No usable listings in {neighborhood.strip()}, {city.strip()}: {path}")
-    if catalog.empty:
-        raise ValueError(f"Listing file has no usable rows in {city.strip()}: {path}")
     return catalog.reset_index(drop=True)
+
+
+def build_real_catalog(raw_path: str = str(RAW_REAL_CATALOG), output_path: str = str(REAL_CATALOG)) -> pd.DataFrame:
+    """
+    Writes REAL_CATALOG, the cleaned version of RAW_REAL_CATALOG, as a semicolon CSV.
+
+    Args:
+        raw_path (str): The original export.
+        output_path (str): Where the cleaned catalog is written.
+
+    Returns:
+        pd.DataFrame: The rows written.
+    """
+    catalog = clean_real_catalog(raw_path)
+    catalog.to_csv(output_path, sep=";", index=False)
+    return catalog
+
+
+def _km_from_city_median(catalog: pd.DataFrame) -> pd.Series:
+    """Distance, in kilometers, from each listing to the median coordinate of its city."""
+    median = catalog.groupby("city")[["lat", "lon"]].transform("median")
+    km_per_degree_lon = KM_PER_DEGREE_LON * np.cos(np.radians(median["lat"]))
+    return np.hypot((catalog["lat"] - median["lat"]) * KM_PER_DEGREE_LAT,
+                    (catalog["lon"] - median["lon"]) * km_per_degree_lon)
 
 
 def _listing_record(node: int, row: Any) -> dict[str, Any]:
@@ -367,18 +425,6 @@ def _house_graph(latitudes: list[float], longitudes: list[float], origin_lat: fl
     return [agency, *houses]
 
 
-def _city_points(city_catalog: pd.DataFrame) -> tuple[list[float], list[float]]:
-    """
-    listing.address.point.lat and listing.address.point.lon of the city's listings
-    that fall between CITY_QUANTILES on both axes.
-    """
-    low, high = CITY_QUANTILES
-    lat_low, lat_high = city_catalog["lat"].quantile([low, high])
-    lon_low, lon_high = city_catalog["lon"].quantile([low, high])
-    inside = city_catalog["lat"].between(lat_low, lat_high) & city_catalog["lon"].between(lon_low, lon_high)
-    return city_catalog.loc[inside, "lat"].tolist(), city_catalog.loc[inside, "lon"].tolist()
-
-
 def _broker_homes(random_seed: int, latitudes: list[float], longitudes: list[float], num_brokers: int,
                   origin_lat: float, origin_lon: float, km_per_degree_lon: float) -> list[list[float]]:
     """
@@ -390,8 +436,8 @@ def _broker_homes(random_seed: int, latitudes: list[float], longitudes: list[flo
 
     Args:
         random_seed (int): Seed of the draw.
-        latitudes (list[float]): listing.address.point.lat of the listings that outline the city.
-        longitudes (list[float]): listing.address.point.lon of the listings that outline the city.
+        latitudes (list[float]): listing.address.point.lat of every listing in the city.
+        longitudes (list[float]): listing.address.point.lon of every listing in the city.
         num_brokers (int): How many homes to place.
         origin_lat (float): Latitude the projection measures north from.
         origin_lon (float): Longitude the projection measures east from.
@@ -511,5 +557,11 @@ def _first_number(values: pd.Series) -> pd.Series:
 
 
 def _missing_label(values: pd.Series) -> pd.Series:
-    """True where the catalog stored a placeholder instead of an address, a district or a type."""
+    """True where the catalog stored a placeholder instead of a city, an address, a district or a type."""
     return values.astype(str).str.strip().str.lower().isin(MISSING_LABELS)
+
+
+if __name__ == "__main__":
+    # Rebuilds data/real.csv from data/raw_real.csv.gz: python -m src.core.listings
+    cleaned = build_real_catalog()
+    print(f"{len(cleaned)} listings in {cleaned['city'].nunique()} cities written to {REAL_CATALOG}")

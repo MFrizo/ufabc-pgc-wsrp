@@ -1,19 +1,24 @@
 """
-Runs a model on a sample of the real São Paulo rental catalog.
+Runs a model on a sample of the real rental catalog, and checks how that catalog is cleaned.
 """
 
 import math
 import unittest
 
+import pandas as pd
+
 from src.core.listings import (
     KM_PER_DEGREE_LAT,
     KM_PER_DEGREE_LON,
     MAP_UNITS_PER_KM,
+    MAX_KM_FROM_CITY,
+    RAW_REAL_CATALOG,
     REAL_CATALOG,
-    _city_points,
     _convex_hull,
+    _km_from_city_median,
     _map_frame,
     _to_map,
+    clean_real_catalog,
     load_instance,
     load_real_catalog,
 )
@@ -85,7 +90,8 @@ class RealDatasetTest(unittest.TestCase):
                          for lat, lon in zip(latitudes, longitudes)]
             return [list(point) for point in _convex_hull([(point[0], point[1]) for point in projected])]
 
-        city = polygon_of(*_city_points(load_real_catalog(REAL_CATALOG, city="São Paulo")))
+        city_catalog = load_real_catalog(REAL_CATALOG, city="São Paulo")
+        city = polygon_of(city_catalog["lat"], city_catalog["lon"])
         moema_catalog = load_real_catalog(REAL_CATALOG, city="São Paulo", neighborhood="Moema")
         moema = polygon_of(moema_catalog["lat"], moema_catalog["lon"])
 
@@ -94,6 +100,16 @@ class RealDatasetTest(unittest.TestCase):
         for home in data["home_coordinates"]:
             self.assertTrue(self._inside_polygon(home, city))
         self.assertTrue(any(not self._inside_polygon(home, moema) for home in data["home_coordinates"]))
+
+    def test_real_catalog_is_the_cleaned_raw_export(self):
+        real = pd.read_csv(REAL_CATALOG, sep=";")
+        cleaned = clean_real_catalog(RAW_REAL_CATALOG)
+
+        pd.testing.assert_frame_equal(real, cleaned, check_dtype=False)
+        self.assertFalse(real[["city", "district", "lat", "lon"]].isna().any().any())
+        self.assertFalse(real["district"].str.strip().str.lower().eq("normal").any())
+        self.assertLessEqual(_km_from_city_median(real).max(), MAX_KM_FROM_CITY)
+        self.assertGreater(real["city"].nunique(), 1)
 
     def test_synthetic_instance_has_no_listings(self):
         data = load_instance("synthetic", "m7", num_properties=5, random_seed=42)
