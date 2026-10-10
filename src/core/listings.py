@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from src.core.data_generator import AUTO_BROKERS, generate_wsrp_instance
-from src.models import INSTANCE_SETTINGS, SINGLE_BROKER_MODELS
+from src.models import INSTANCE_SETTINGS, SINGLE_BROKER_MODELS, STRICT_TIME_MODELS
 from src.utils.logger import project_logger
 from src.utils.real_catalog import (KM_PER_DEGREE_LAT, KM_PER_DEGREE_LON, REAL_CATALOG, REAL_CATALOG_SOURCE,
                                     clean_real_catalog)
@@ -35,7 +35,7 @@ MAP_CENTER = (50.0, 50.0)
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
                   num_brokers: Optional[Union[int, str]] = None, city: Optional[str] = None,
-                  neighborhood: Optional[str] = None) -> dict[str, Any]:
+                  neighborhood: Optional[str] = None, fixed_ratio: Optional[float] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
 
@@ -51,14 +51,17 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         city (Optional[str]): City of a real instance. Required when dataset is "real".
         neighborhood (Optional[str]): Neighborhood of a real instance, inside that city. None
             samples the whole city.
+        fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to
+            1; the others may start at any time of the day. STRICT_TIME_MODELS warn and ignore
+            it. None keeps the model's own setting.
 
     Returns:
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
 
     Raises:
         ValueError: If dataset is unknown, num_brokers is neither a positive integer nor
-            AUTO_BROKERS, a real call omits the city, or the city or neighborhood cannot
-            supply the sample.
+            AUTO_BROKERS, fixed_ratio is outside [0, 1], a real call omits the city, or the
+            city or neighborhood cannot supply the sample.
     """
     if dataset not in DATASETS:
         raise ValueError(f"dataset must be one of: {', '.join(DATASETS)}.")
@@ -68,10 +71,17 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
     if num_brokers is not None and model_version in SINGLE_BROKER_MODELS:
         project_logger.warning(f"{model_version} routes a single broker; ignoring num_brokers={num_brokers!r}.")
         num_brokers = None
+    if fixed_ratio is not None and not 0 <= fixed_ratio <= 1:
+        raise ValueError(f"fixed_ratio must be between 0 and 1, not {fixed_ratio}.")
+    if fixed_ratio is not None and model_version in STRICT_TIME_MODELS:
+        project_logger.warning(f"{model_version} books every visit at a strict time; ignoring fixed_ratio={fixed_ratio}.")
+        fixed_ratio = None
 
     instance_settings = dict(INSTANCE_SETTINGS[model_version])
     if num_brokers is not None:
         instance_settings['num_brokers'] = num_brokers
+    if fixed_ratio is not None:
+        instance_settings['fixed_ratio'] = fixed_ratio
 
     if dataset == "synthetic":
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **instance_settings)
