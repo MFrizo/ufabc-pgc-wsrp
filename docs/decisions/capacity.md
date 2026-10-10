@@ -45,7 +45,7 @@ m0.6 has identical brokers and no capacity, so it is a VRPTW with hierarchical f
 - m1, for each broker $k$: $\sum_{i \in C} \sum_{j} x_{ijk} \le Q_k \, y_k$.
 - m2, for each broker $k$, summed over both of his shifts $R_k$: $\sum_{r \in R_k} \sum_{i \in C} \sum_{j} x_{ijr} \le Q_k$.
 
-On m1 the fleet term pushes the solver to load as many visits as possible onto each broker, so a cap is the realistic counterweight and gives the bin-packing bound $\lceil n / Q \rceil$ on the number of brokers. The factor $Q_k y_k$ also tightens the linear relaxation, which is weak because of the Big-M constraints. On m2 the same inequality is a workload rule, in the family surveyed by Matl, Hartl and Vidal (2018). It is not implemented.
+On m1 the fleet term pushes the solver to load as many visits as possible onto each broker, so a cap is the realistic counterweight and gives the bin-packing bound $\lceil n / Q \rceil$ on the number of brokers. The factor $Q_k y_k$ also tightens the linear relaxation, which is weak because of the Big-M constraints. On m2 the same inequality would cap the number of visits. It is not implemented. m2 does penalize the longest time a working broker is out, which is a different workload measure from that cap (Matl, Hartl and Vidal, 2018).
 
 **Service time as the demand.** Setting $q_i = s_i$ repeats the duration constraints that are already in the model.
 
