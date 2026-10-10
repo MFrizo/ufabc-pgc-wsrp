@@ -18,6 +18,7 @@ Usage:
     python main.py --model m7 --properties 12 --brokers 4    # Custom instance size
     python main.py --model m7 --properties 12 --brokers auto    # Fleet drawn from the instance
     python main.py --model m7 --seed 7    # Another reproducible instance
+    python main.py --model m2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
 
     python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
     python main.py --model m7 --dataset real --city "São Paulo"    # Real listings of the whole city
@@ -36,7 +37,7 @@ from src.utils.parsers import print_results
 
 def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = None,
          dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None,
-         random_seed: Optional[int] = None):
+         random_seed: Optional[int] = None, fixed_ratio: Optional[float] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -53,6 +54,9 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
             samples the whole city.
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
             src.models.DEFAULT_SEEDS or DEFAULT_SEED.
+        fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
+            the others may start at any time of the day. m7 and m8 warn and ignore it. None keeps
+            the model's own setting.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
@@ -68,7 +72,10 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     project_logger.info(f"PHASE 1: Ingesting {dataset} dataset ({num_properties} properties + 1 Depot, "
                         f"{brokers} brokers, seed {random_seed})...")
     data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
-                                 num_brokers=num_brokers, city=city, neighborhood=neighborhood)
+                                 num_brokers=num_brokers, city=city, neighborhood=neighborhood,
+                                 fixed_ratio=fixed_ratio)
+    num_fixed = len(data_payload['fixed_visits'])
+    project_logger.info(f"Visits: {num_fixed} at a strict time, {num_properties - num_fixed} at any time.")
     if 'schedule_brokers' in data_payload:
         project_logger.info(f"Fleet drawn: {data_payload['num_brokers']} brokers, between "
                             f"{data_payload['schedule_brokers']} (fewest the visits need) and "
@@ -116,6 +123,17 @@ def _brokers(value: str) -> Union[int, str]:
     return int(value)
 
 
+def _ratio(value: str) -> float:
+    """--fixed-ratio value: a share from 0 to 1."""
+    try:
+        ratio = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number from 0 to 1") from None
+    if not 0 <= ratio <= 1:
+        raise argparse.ArgumentTypeError("must be a number from 0 to 1")
+    return ratio
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSRP optimization pipeline")
     parser.add_argument('--model', choices=BUILDERS.keys(), default='m7',
@@ -130,6 +148,11 @@ if __name__ == "__main__":
                         help=f"Seed of the instance; each seed is another reproducible instance "
                              f"(default: the model's own, {DEFAULT_SEED}, or "
                              + ", ".join(f"{seed} for {model}" for model, seed in DEFAULT_SEEDS.items()) + ")")
+    parser.add_argument('--fixed-ratio', type=_ratio, default=None,
+                        help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
+                             "others may start at any time of the day. Strict times follow a continuous uniform "
+                             "distribution over each broker's free time. m7 and m8 book every visit, so they warn "
+                             "and ignore it (default: the model's own setting)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
                         help="Instance source: the synthetic generator, or the real rental catalog of a "
                              "Brazilian real estate company (default: synthetic)")
@@ -141,4 +164,4 @@ if __name__ == "__main__":
     if args.dataset == 'real' and not args.city:
         parser.error("--dataset real requires --city")
     main(args.model, num_properties=args.properties, num_brokers=args.brokers, dataset=args.dataset,
-         city=args.city, neighborhood=args.neighborhood, random_seed=args.seed)
+         city=args.city, neighborhood=args.neighborhood, random_seed=args.seed, fixed_ratio=args.fixed_ratio)

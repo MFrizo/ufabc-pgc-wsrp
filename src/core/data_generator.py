@@ -42,8 +42,7 @@ AFTERNOON_SHIFT = ((300, 360), (540, 600))      # Starts 13:00 to 14:00, ends 17
 
 def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: Union[int, str] = 1,
                            travel_time: int = 30, service_time: int = 60, horizon: int = 600,
-                           fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
-                           assigned_ratio: float = 0.4, service_time_variation: int = 0,
+                           fixed_ratio: float = 0.2, assigned_ratio: float = 0.4, service_time_variation: int = 0,
                            speed_profile: Optional[list[tuple[int, float]]] = None,
                            working_hours: tuple[int, int] = (0, 540),
                            start_at_homes: bool = False, days_off: int = 0,
@@ -68,8 +67,10 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         service_time (int): Constant visit duration S, in minutes.
         horizon (int): Target length of the working day over which the visits are spread, in
             minutes (e.g. 600 = 08:00 to 18:00). Extended when the visits don't fit in it.
-        fixed_ratio (float): Share of the properties with a fixed start time.
-        window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
+        fixed_ratio (float): Share of the properties with a fixed start time, from 0 to 1. Those
+            starts follow a continuous uniform distribution over each broker's free time in the
+            hidden schedule (see _place_visits); every other visit may start at any time of the
+            day that lets it end by the horizon.
         assigned_ratio (float): Share of the properties whose visit already has a broker.
         service_time_variation (int): Each visit lasts a duration drawn from
             [S - variation, S + variation], in minutes. With 0, every visit lasts S.
@@ -121,10 +122,12 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         ValueError: If the visits don't fit in the shifts, or in the longest working day, or
             the graph does not have num_properties + 1 nodes, or areas num_properties values.
     """
+    if not 0 <= fixed_ratio <= 1:
+        raise ValueError(f"fixed_ratio must be between 0 and 1, not {fixed_ratio}.")
     if num_brokers == AUTO_BROKERS:
         return _auto_fleet_instance(num_properties, random_seed, max_routing_arcs, {
             'travel_time': travel_time, 'service_time': service_time, 'horizon': horizon,
-            'fixed_ratio': fixed_ratio, 'window_width': window_width, 'assigned_ratio': assigned_ratio,
+            'fixed_ratio': fixed_ratio, 'assigned_ratio': assigned_ratio,
             'service_time_variation': service_time_variation, 'speed_profile': speed_profile,
             'working_hours': working_hours, 'start_at_homes': start_at_homes, 'days_off': days_off,
             'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
@@ -166,7 +169,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     lunch_legs = np.max(data_payload['lunch_spot_travel_times'], axis=0).tolist()
 
     time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
-                                          data_payload['service_times'], horizon, fixed_ratio, window_width,
+                                          data_payload['service_times'], horizon, fixed_ratio,
                                           data_payload['shifts'] if split_shifts else None, lunch_legs,
                                           lunch_break, max_day_length)
     reference_broker = time_windows.pop('reference_broker')
@@ -514,12 +517,17 @@ def _workload(visits: list[int], first_leg: list[int], leg_times: list[list[int]
 def _place_visits(rng: np.random.Generator, visits: list[int], first_leg: list[int], leg_times: list[list[int]],
                   service_times: list[int], day_start: int, day_end: int, reference_start: list[int]) -> None:
     """
-    Places the visits in order between day_start and day_end, spreading the slack as
-    random idle gaps between them, and writes their start times to reference_start.
+    Places the visits in order between day_start and day_end and writes their start times
+    to reference_start.
+
+    The slack is the free time left once the trips and the visits are done back to back.
+    The idle time before each visit follows a continuous uniform distribution U(0, slack):
+    one draw per visit, sorted so the visits keep their order (the uniform order
+    statistics). Each visit is therefore as likely to start at any free moment of the day,
+    and the last one still ends by day_end, whatever the draws.
     """
     slack = day_end - day_start - _workload(visits, first_leg, leg_times, service_times)
-    gaps = rng.random(len(visits) + 1)
-    idle_before = np.cumsum(gaps / gaps.sum() * slack)[:len(visits)]
+    idle_before = np.sort(rng.uniform(0, slack, size=len(visits)))
 
     # Minutes of travel and visits done so far, idle gaps aside
     busy = 0
@@ -533,7 +541,7 @@ def _place_visits(rng: np.random.Generator, visits: list[int], first_leg: list[i
 
 def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, leg_times: list[list[int]],
                            first_legs: list[list[int]], service_times: list[int], horizon: int,
-                           fixed_ratio: float, window_width: tuple[int, int],
+                           fixed_ratio: float,
                            shifts: Optional[list[list[tuple[int, int]]]] = None,
                            lunch_legs: Optional[list[list[int]]] = None,
                            lunch_break: Optional[tuple[int, int, int]] = None,
@@ -541,7 +549,9 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
-    emulating visits already scheduled by the visitors.
+    emulating visits already scheduled by the visitors, at its start in the hidden schedule:
+    uniformly distributed over each broker's free time (see _place_visits). Every other
+    visit may start at any time of the day that lets it end by the horizon.
 
     Args:
         num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
@@ -552,8 +562,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             first trip of the day, to each node, in minutes.
         service_times (list[int]): Duration s_i of the visit at each node, in minutes.
         horizon (int): Target length of the working day, in minutes.
-        fixed_ratio (float): Share of the properties with a fixed start time.
-        window_width (tuple[int, int]): Min and max width of a flexible time window, in minutes.
+        fixed_ratio (float): Share of the properties with a fixed start time, from 0 to 1.
         shifts (Optional[list[list[tuple[int, int]]]]): Morning and afternoon shift of each broker.
             When given, the visits of each broker of the hidden schedule fit in his shifts.
         lunch_legs (Optional[list[list[int]]]): Travel time from each broker's lunch spot to each
@@ -667,15 +676,12 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
 
     for node in range(1, num_nodes):
         if node in fixed_visits:
-            # Visit already scheduled by the visitor: e_i = l_i
+            # Visit already scheduled by the visitor at its time in the hidden schedule: e_i = l_i
             earliest_start[node] = reference_start[node]
             latest_start[node] = reference_start[node]
         else:
-            # Flexible visit: a window containing the reference start time
-            width = int(rng.integers(window_width[0], window_width[1] + 1))
-            opening = reference_start[node] - int(rng.integers(0, width + 1))
-            earliest_start[node] = max(0, opening)
-            latest_start[node] = min(horizon - service_times[node], opening + width)
+            # Flexible visit: any start that still ends within the day
+            latest_start[node] = horizon - service_times[node]
 
     return {
         'earliest_start': earliest_start,

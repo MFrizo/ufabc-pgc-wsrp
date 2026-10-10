@@ -28,6 +28,9 @@ BUILDERS = {
 # Models that route a single broker, so they ignore a number of brokers
 SINGLE_BROKER_MODELS = ('m0', 'm1')
 
+# Models that book every visit at its earliest start h_i, so every visit has a strict time
+STRICT_TIME_MODELS = ('m7', 'm8')
+
 # Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day
 RUSH_HOURS = [(0, 1.0), (120, 2.0), (540, 1.0)]
 
@@ -56,5 +59,5 @@ INSTANCE_SETTINGS = {
 # Seed of each model's default run
 DEFAULT_SEED = 42
 DEFAULT_SEEDS = {
-    'm7': 17,  # 2 brokers serve 5 to 7 properties; from 8 on, the third one is needed
+    'm7': 8,  # 2 brokers serve 5 to 7 properties; from 8 on, the third one is needed
 }
