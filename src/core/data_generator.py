@@ -9,7 +9,7 @@ Description: Single point of generation of synthetic, reproducible instances for
 
 import math
 import numpy as np
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 # Random stream of each feature. The graph uses the plain seed; every other feature
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
@@ -19,13 +19,23 @@ SERVICE_TIMES_STREAM = 3
 HOMES_STREAM = 4
 LUNCH_SPOTS_STREAM = 5
 SHIFTS_STREAM = 6
+FLEET_STREAM = 7
+
+# num_brokers value that draws the fleet from the instance instead of fixing it
+AUTO_BROKERS = "auto"
+
+# Most routing arcs (brokers x arcs between the nodes) an automatic fleet may give the solver.
+# The bound is memory, not time: 225 properties with 44 brokers, about 2.24 million arcs,
+# solved without running out of memory. A constant, not the free memory, keeps a seed's
+# fleet the same on every machine.
+MAX_ROUTING_ARCS = 2_250_000
 
 # Range of the start and of the end of each broker's shifts, in minutes from 08:00
 MORNING_SHIFT = ((0, 60), (210, 270))           # Starts 08:00 to 09:00, ends 11:30 to 12:30
 AFTERNOON_SHIFT = ((300, 360), (540, 600))      # Starts 13:00 to 14:00, ends 17:00 to 18:00
 
 
-def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: int = 1,
+def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_brokers: Union[int, str] = 1,
                            travel_time: int = 30, service_time: int = 60, horizon: int = 600,
                            fixed_ratio: float = 0.2, window_width: tuple[int, int] = (120, 360),
                            assigned_ratio: float = 0.4, service_time_variation: int = 0,
@@ -35,15 +45,18 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            split_shifts: bool = False,
                            lunch_break: Optional[tuple[int, int, int]] = None,
                            max_day_length: Optional[int] = None,
-                           graph: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+                           graph: Optional[dict[str, Any]] = None,
+                           max_routing_arcs: int = MAX_ROUTING_ARCS) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
     Args:
         num_properties (int): The number of properties to be visited.
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
-        num_brokers (int): Number of brokers |K|. The hidden schedule behind the time windows
-            is split among them, so with more than one broker the visits may overlap.
+        num_brokers (Union[int, str]): Number of brokers |K|. The hidden schedule behind the time
+            windows is split among them, so with more than one broker the visits may overlap.
+            AUTO_BROKERS draws it at random between the fewest brokers the visits need and the
+            most the solver can take: see _auto_fleet_instance.
         travel_time (int): Constant travel time T between any two nodes, in minutes.
         service_time (int): Constant visit duration S, in minutes.
         horizon (int): Target length of the working day over which the visits are spread, in
@@ -72,6 +85,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         graph (Optional[dict[str, Any]]): Nodes to visit instead of the random 100x100 map, with
             'num_nodes' (num_properties + 1), 'coordinates' and 'distance_matrix', e.g. real
             listings. Every other feature is still generated.
+        max_routing_arcs (int): Most brokers x arcs between the nodes an AUTO_BROKERS fleet may
+            give the solver. Not used with a fixed num_brokers.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -86,11 +101,23 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'home_coordinates', 'home_distances', 'home_travel_times': M7 onwards.
             - 'shift_start', 'shift_end': M7.
             - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M8.
+            - 'schedule_brokers', 'max_brokers': with AUTO_BROKERS, the range num_brokers was
+              drawn from.
 
     Raises:
         ValueError: If the visits don't fit in the shifts, or in the longest working day, or
             the graph does not have num_properties + 1 nodes.
     """
+    if num_brokers == AUTO_BROKERS:
+        return _auto_fleet_instance(num_properties, random_seed, max_routing_arcs, {
+            'travel_time': travel_time, 'service_time': service_time, 'horizon': horizon,
+            'fixed_ratio': fixed_ratio, 'window_width': window_width, 'assigned_ratio': assigned_ratio,
+            'service_time_variation': service_time_variation, 'speed_profile': speed_profile,
+            'working_hours': working_hours, 'start_at_homes': start_at_homes, 'days_off': days_off,
+            'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
+            'graph': graph,
+        })
+
     num_nodes = num_properties + 1
 
     if graph is None:
@@ -132,6 +159,104 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     data_payload['shift_end'] = [working_hours[1]] * num_brokers
 
     return data_payload
+
+
+def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs: int,
+                         settings: dict[str, Any]) -> dict[str, Any]:
+    """
+    Builds the instance with a fleet drawn at random, from the fewest brokers the visits
+    need to the most the solver can take.
+
+    The fewest brokers is the smallest count whose hidden schedule fits the day: the visits
+    fit in the shifts, and the day is no longer than the model's limit (M7's 12 hours) or,
+    without one, the horizon. That schedule is a plan those brokers can carry out, so the instance is feasible
+    with them. Every model lets a broker stay at home, so it stays feasible with any larger
+    fleet; the solver may need fewer.
+
+    The most is max_fleet. The fleet is drawn uniformly between the two from FLEET_STREAM.
+    The brokers beyond the schedule's have their own homes, lunch spots and shifts; the
+    schedule's brokers keep exactly the ones they have with a fixed fleet of that size.
+
+    Args:
+        num_properties (int): The number of properties to be visited.
+        random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        max_routing_arcs (int): Most brokers x arcs between the nodes the fleet may give the solver.
+        settings (dict[str, Any]): Every other argument of generate_wsrp_instance.
+
+    Returns:
+        dict[str, Any]: The instance payload, with 'schedule_brokers' and 'max_brokers'.
+
+    Raises:
+        ValueError: If the visits don't fit in a day even with one broker per property.
+    """
+    days_off = settings['days_off']
+    schedule = None
+    for brokers in range(days_off + 1, days_off + num_properties + 1):
+        try:
+            candidate = generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed,
+                                               num_brokers=brokers, **settings)
+        except ValueError:
+            continue
+        if settings['split_shifts'] or candidate['latest_start'][0] <= _day_length(settings):
+            schedule = candidate
+            break
+    if schedule is None:
+        raise ValueError("The visits don't fit in a day even with one broker per property; use fewer properties.")
+
+    schedule_brokers = schedule['num_brokers']
+    max_brokers = max_fleet(num_properties, schedule_brokers, days_off, max_routing_arcs)
+    rng = np.random.default_rng([random_seed, FLEET_STREAM])
+    num_brokers = int(rng.integers(schedule_brokers, max_brokers + 1))
+
+    data_payload = dict(schedule)
+    data_payload['num_brokers'] = num_brokers
+    data_payload['schedule_brokers'] = schedule_brokers
+    data_payload['max_brokers'] = max_brokers
+    if num_brokers > schedule_brokers:
+        # Places are drawn one broker after another, so the first ones are the schedule's
+        for prefix, stream in (('home', HOMES_STREAM), ('lunch_spot', LUNCH_SPOTS_STREAM)):
+            places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
+                                             settings['travel_time'], settings['speed_profile'])
+            data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
+        # The extra brokers all work; the schedule's keep their shifts and days off
+        extra_shifts = _generate_shifts(random_seed, num_brokers, 0)[schedule_brokers:]
+        data_payload['shifts'] = schedule['shifts'] + extra_shifts
+        data_payload['shift_start'] = [settings['working_hours'][0]] * num_brokers
+        data_payload['shift_end'] = [settings['working_hours'][1]] * num_brokers
+    return data_payload
+
+
+def max_fleet(num_properties: int, schedule_brokers: int, days_off: int = 0,
+              max_routing_arcs: int = MAX_ROUTING_ARCS) -> int:
+    """
+    Most brokers an automatic fleet may have.
+
+    The solver's routing variables grow with the brokers times the arcs between the nodes,
+    so the fleet keeps that product within max_routing_arcs, and never has more working
+    brokers than properties. It is never below schedule_brokers, which the instance needs.
+
+    Args:
+        num_properties (int): The number of properties to be visited.
+        schedule_brokers (int): Fewest brokers the instance needs.
+        days_off (int): Number of brokers who have no shifts in the day.
+        max_routing_arcs (int): Most brokers x arcs between the nodes the solver may receive.
+
+    Returns:
+        int: The largest fleet the draw may pick.
+    """
+    num_nodes = num_properties + 1
+    within_budget = max_routing_arcs // (num_nodes * (num_nodes - 1))
+    return max(schedule_brokers, min(num_properties + days_off, within_budget))
+
+
+def _day_length(settings: dict[str, Any]) -> int:
+    """
+    Longest day the hidden schedule may take, in minutes: the model's own limit when it has
+    one (M7's 12 hours), otherwise the horizon, which the models without a limit only target.
+    """
+    if settings['max_day_length'] is None:
+        return settings['horizon']
+    return settings['max_day_length']
 
 
 def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:

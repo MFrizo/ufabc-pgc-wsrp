@@ -10,12 +10,12 @@ Description: Builds the instance a model runs on, from the synthetic generator o
 """
 
 import math
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
 
-from src.core.data_generator import generate_wsrp_instance
+from src.core.data_generator import AUTO_BROKERS, generate_wsrp_instance
 from src.models import INSTANCE_SETTINGS
 from src.utils.logger import project_logger
 from src.utils.real_catalog import (KM_PER_DEGREE_LAT, KM_PER_DEGREE_LON, REAL_CATALOG, REAL_CATALOG_SOURCE,
@@ -31,7 +31,7 @@ MAP_CENTER = (50.0, 50.0)
 
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
-                  num_brokers: Optional[int] = None, city: Optional[str] = None,
+                  num_brokers: Optional[Union[int, str]] = None, city: Optional[str] = None,
                   neighborhood: Optional[str] = None, catalog_path: Optional[str] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
@@ -41,8 +41,9 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         model_version (str): Key of src.models.BUILDERS. Selects that model's INSTANCE_SETTINGS.
         num_properties (int): Number of properties to visit.
         random_seed (int): Seed of the sample and of every generated feature.
-        num_brokers (Optional[int]): Number of brokers |K|, read from M2 onwards. None keeps
-            the model's own setting.
+        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M2 onwards.
+            AUTO_BROKERS draws it between the fewest brokers the visits need and the most the
+            solver can take. None keeps the model's own setting.
         city (Optional[str]): City of a real instance. Required when dataset is "real".
         neighborhood (Optional[str]): Neighborhood of a real instance, inside that city.
             Required when dataset is "real".
@@ -53,11 +54,15 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
 
     Raises:
-        ValueError: If dataset is unknown, a real call omits the city or the neighborhood,
-            or the neighborhood cannot supply the sample.
+        ValueError: If dataset is unknown, num_brokers is neither a positive integer nor
+            AUTO_BROKERS, a real call omits the city or the neighborhood, or the neighborhood
+            cannot supply the sample.
     """
     if dataset not in DATASETS:
         raise ValueError(f"dataset must be one of: {', '.join(DATASETS)}.")
+    if num_brokers is not None and num_brokers != AUTO_BROKERS and (
+            isinstance(num_brokers, bool) or not isinstance(num_brokers, int) or num_brokers < 1):
+        raise ValueError(f"num_brokers must be a positive integer or {AUTO_BROKERS!r}.")
 
     instance_settings = dict(INSTANCE_SETTINGS[model_version])
     if num_brokers is not None:
