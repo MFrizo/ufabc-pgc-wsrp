@@ -1,19 +1,42 @@
 """
-Module: model_3
-Description: Mathematical formulation of Model 3 (M3) for the WSRP.
-             Implemented as a Site-Dependent Vehicle Routing Problem with Time Windows
-             (SDVRPTW): the VRPTW of M2, where some visits already have a broker and
-             only that broker may do them.
+Module: model_0_4
+Description: Mathematical formulation of M0.4 for the WSRP.
+             Implemented as a Vehicle Routing Problem with Time Windows with Variable
+             Service Times (VRPTWWVST): the SDVRPTW of M0.3, where each visit has its own
+             duration s_i instead of the constant S.
 """
 
 import pyomo.environ as pyo
 
-from src.models.model_1 import compute_big_m
 
-
-def build_model_m3(data: dict) -> pyo.ConcreteModel:
+def compute_big_m(data: dict) -> float:
     """
-    Constructs the MILP polyhedron for the M3 routing problem (SDVRPTW).
+    Computes the smallest single Big-M value that keeps the time-flow
+    constraint (4.5) inactive whenever x_ijk = 0.
+
+    For any feasible schedule, w_i + s_i + T - w_j <= l_i + s_i + T - e_j,
+    so the maximum of the right-hand side over all arcs is a valid bound.
+
+    Args:
+        data (dict): Instance payload (see build_model_m0_4).
+
+    Returns:
+        float: The Big-M constant.
+    """
+    num_nodes = data['num_nodes']
+    earliest = data['earliest_start']
+    latest = data['latest_start']
+    service = data['service_times']
+
+    bound = max(latest[i] + service[i] + data['travel_time'] - earliest[j]
+                for i in range(num_nodes) for j in range(1, num_nodes) if i != j)
+
+    return max(bound, 0.0)
+
+
+def build_model_m0_4(data: dict) -> pyo.ConcreteModel:
+    """
+    Constructs the MILP polyhedron for the M0.4 routing problem (VRPTWWVST).
 
     Args:
         data (dict): A dictionary containing instance parameters:
@@ -21,7 +44,7 @@ def build_model_m3(data: dict) -> pyo.ConcreteModel:
             - 'num_brokers' (int): Number of brokers |K|.
             - 'distance_matrix' (list of lists): 2D array of travel distances (c_ij).
             - 'travel_time' (float): Constant travel time T between any two nodes.
-            - 'service_time' (float): Constant visit duration S for every property.
+            - 'service_times' (list): Duration s_i of the visit at every node, s_0 = 0.
             - 'earliest_start' (list): Earliest start time e_i for every node in V.
             - 'latest_start' (list): Latest start time l_i for every node in V.
             - 'assigned_broker' (list): Broker already assigned to each node, 0 if none.
@@ -30,7 +53,7 @@ def build_model_m3(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    model = pyo.ConcreteModel(name="WSRP_M3_SDVRPTW")
+    model = pyo.ConcreteModel(name="WSRP_M0_4_VRPTWWVST")
 
     # =========================================================================
     # 1. SETS (Indices)
@@ -56,9 +79,9 @@ def build_model_m3(data: dict) -> pyo.ConcreteModel:
     # T: Constant travel time between any two nodes
     model.travel_time = pyo.Param(initialize=data['travel_time'], doc="Travel time T")
 
-    # s_i: Service time, s_0 = 0 at the base and s_i = S for every property
+    # s_i: Service time of the visit at node i, s_0 = 0 at the base
     def service_rule(model_instance, i):
-        return 0.0 if i == 0 else data['service_time']
+        return data['service_times'][i]
 
     model.service = pyo.Param(model.V, initialize=service_rule, doc="Service time s_i")
 

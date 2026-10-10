@@ -44,7 +44,7 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         model_version (str): Key of src.models.BUILDERS. Selects that model's INSTANCE_SETTINGS.
         num_properties (int): Number of properties to visit.
         random_seed (int): Seed of the sample and of every generated feature.
-        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M2 onwards;
+        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M0.2 onwards;
             SINGLE_BROKER_MODELS warn and ignore it. AUTO_BROKERS draws it between the fewest
             brokers the visits need and the most the solver can take. None keeps the model's
             own setting.

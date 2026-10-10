@@ -5,24 +5,24 @@ Description: Entrypoint script for local execution of the WSRP optimization pipe
              solving, and parsing.
 
 Usage:
-    python main.py --model m0    # Case 1: TSP
-    python main.py --model m1    # Case 2: TSPTW
-    python main.py --model m2    # Case 3: VRPTW
-    python main.py --model m3    # Case 4: SDVRPTW
-    python main.py --model m4    # Case 5: VRPTWWVST
-    python main.py --model m5    # Case 6: TDVRPTW
-    python main.py --model m6    # Case 7: FSMVRPTW
-    python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
-    python main.py --model m8    # Case 8.b: HC-DOMDVRPTW-SD
-    python main.py --model m9 --fixed-ratio 0.25    # Case 8.a with flexible visits: a quarter of them booked
+    python main.py --model m0.0    # Sub-step: TSP
+    python main.py --model m0.1    # Sub-step: TSPTW
+    python main.py --model m0.2    # Sub-step: VRPTW
+    python main.py --model m0.3    # Sub-step: SDVRPTW
+    python main.py --model m0.4    # Sub-step: VRPTWWVST
+    python main.py --model m0.5    # Sub-step: TDVRPTW
+    python main.py --model m0.6    # Sub-step: FSMVRPTW
+    python main.py --model m1      # First complete model: MO-DOMDVRPTW-SD
+    python main.py --model m1.a --fixed-ratio 0.25    # Subcase of m1: a quarter of the visits booked
+    python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
 
-    python main.py --model m7 --properties 12 --brokers 4    # Custom instance size
-    python main.py --model m7 --properties 12 --brokers auto    # Fleet drawn from the instance
-    python main.py --model m7 --seed 7    # Another reproducible instance
-    python main.py --model m2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
+    python main.py --model m1 --properties 12 --brokers 4    # Custom instance size
+    python main.py --model m1 --properties 12 --brokers auto    # Fleet drawn from the instance
+    python main.py --model m1 --seed 7    # Another reproducible instance
+    python main.py --model m0.2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
 
-    python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
-    python main.py --model m7 --dataset real --city "São Paulo"    # Real listings of the whole city
+    python main.py --model m1 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
+    python main.py --model m1 --dataset real --city "São Paulo"    # Real listings of the whole city
 """
 
 import argparse
@@ -43,10 +43,10 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     Main execution pipeline for local development and benchmarking.
 
     Args:
-        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0', 'm1', 'm2').
+        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0.0', 'm1', 'm1.a', 'm2').
         num_properties (int): Number of properties to visit.
-        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M2 onwards;
-            m0 and m1 warn and ignore it. "auto" draws it between the fewest brokers the visits
+        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M0.2 onwards;
+            m0.0 and m0.1 warn and ignore it. "auto" draws it between the fewest brokers the visits
             need and the most the solver can take. None keeps the model's own setting in
             src.models.INSTANCE_SETTINGS.
         dataset (str): "synthetic" for the generator, "real" for the real rental catalog.
@@ -56,7 +56,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
             src.models.DEFAULT_SEEDS or DEFAULT_SEED.
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
-            the others may start at any time of the day. m7 and m8 warn and ignore it. None keeps
+            the others may start at any time of the day. m1 and m2 warn and ignore it. None keeps
             the model's own setting.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
@@ -137,12 +137,12 @@ def _ratio(value: str) -> float:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WSRP optimization pipeline")
-    parser.add_argument('--model', choices=BUILDERS.keys(), default='m7',
-                        help="Model to execute (default: m7, Case 8.a)")
+    parser.add_argument('--model', choices=BUILDERS.keys(), default='m1',
+                        help="Model to execute (default: m1, the first complete model)")
     parser.add_argument('--properties', type=int, default=5,
                         help="Number of properties to visit (default: 5)")
     parser.add_argument('--brokers', type=_brokers, default=None,
-                        help="Number of brokers, read from M2 onwards (m0 and m1 warn and ignore it), or 'auto' "
+                        help="Number of brokers, read from M0.2 onwards (m0.0 and m0.1 warn and ignore it), or 'auto' "
                              "to draw it between the fewest the visits need and the most the solver takes "
                              "(default: the model's own setting)")
     parser.add_argument('--seed', type=int, default=None,
@@ -152,8 +152,8 @@ if __name__ == "__main__":
     parser.add_argument('--fixed-ratio', type=_ratio, default=None,
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
-                             "distribution over each broker's free time. m7 and m8 book every visit, so they warn "
-                             "and ignore it; m9 is m7 with this share of the visits booked (default: the model's "
+                             "distribution over each broker's free time. m1 and m2 book every visit, so they warn "
+                             "and ignore it; m1.a is m1 with this share of the visits booked (default: the model's "
                              "own setting)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
                         help="Instance source: the synthetic generator, or the real rental catalog of a "

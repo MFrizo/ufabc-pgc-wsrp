@@ -1,13 +1,13 @@
-# M9 Executions: Fixed Ratio Benchmark
+# M1.a Executions: Fixed Ratio Benchmark
 
-How the share of booked visits weighs on the solver. M9 is M7 (MO-DOMDVRPTW-SD) where only `fixed_ratio` of the visits are booked: a booked visit starts within ±10 minutes of its time, any other one at any time of the day. With `fixed_ratio` 1.0 the instance and the optimum are M7's.
+How the share of booked visits weighs on the solver. M1.a is M1 (MO-DOMDVRPTW-SD) where only `fixed_ratio` of the visits are booked: a booked visit starts within ±10 minutes of its time, any other one at any time of the day. With `fixed_ratio` 1.0 the instance and the optimum are M1's.
 
 ## Setup
 
 | Setting       | Value                                                                                   |
 |---------------|-----------------------------------------------------------------------------------------|
 | Dataset       | Synthetic                                                                               |
-| Model         | m9                                                                                      |
+| Model         | m1.a                                                                                      |
 | Solver        | Gurobi 13.0.3 (`gurobi_direct`) through Pyomo 6.10.1, raw mode, MIP gap 0               |
 | Fixed ratios  | 0, 0.25, 0.5, 0.75, 1                                                                   |
 | 5–7 properties| Seeds 1–5, 120 seconds limit                                                            |
@@ -19,7 +19,7 @@ Time is the wall clock of `solve_model`, building the solver model included.
 
 ## Mean Time to Prove Optimality
 
-| Properties | Ratio 0 | Ratio 0.25 | Ratio 0.5 | Ratio 0.75 | Ratio 1 (M7) |
+| Properties | Ratio 0 | Ratio 0.25 | Ratio 0.5 | Ratio 0.75 | Ratio 1 (M1) |
 |------------|---------|------------|-----------|------------|--------------|
 | 5 | 0.08 s | 0.05 s | 0.03 s | 0.02 s | 0.02 s |
 | 6 | 0.42 s | 0.08 s | 0.06 s | 0.04 s | 0.03 s |

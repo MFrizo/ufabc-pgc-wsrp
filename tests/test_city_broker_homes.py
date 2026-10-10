@@ -34,7 +34,7 @@ class CityBrokerHomesTest(unittest.TestCase):
 
     def test_homes_are_inside_the_city(self):
         for seed in range(1, 6):
-            data = load_instance("real", "m7", num_properties=6, random_seed=seed, num_brokers=4,
+            data = load_instance("real", "m1", num_properties=6, random_seed=seed, num_brokers=4,
                                  city=CITY, neighborhood=NEIGHBORHOOD)
             hull = self._city_hull(data)
             for home in data["home_coordinates"]:
@@ -46,20 +46,20 @@ class CityBrokerHomesTest(unittest.TestCase):
         moema_radius = max(math.dist(MAP_CENTER, to_map(lat, lon)) for lat, lon in zip(moema["lat"], moema["lon"]))
         farthest = max(math.dist(MAP_CENTER, home)
                        for seed in range(1, 6)
-                       for home in load_instance("real", "m7", num_properties=6, random_seed=seed, num_brokers=4,
+                       for home in load_instance("real", "m1", num_properties=6, random_seed=seed, num_brokers=4,
                                                  city=CITY, neighborhood=NEIGHBORHOOD)["home_coordinates"])
         self.assertGreater(farthest, 3 * moema_radius)
         self.assertGreater(farthest / MAP_UNITS_PER_KM, 10)
 
     def test_home_distances_follow_the_homes(self):
-        data = load_instance("real", "m7", num_properties=6, random_seed=17, city=CITY, neighborhood=NEIGHBORHOOD)
+        data = load_instance("real", "m1", num_properties=6, random_seed=17, city=CITY, neighborhood=NEIGHBORHOOD)
         for home, distances in zip(data["home_coordinates"], data["home_distances"]):
             self.assertEqual(distances, [round(math.dist(home, node), 2) for node in data["coordinates"]])
 
     def test_auto_fleet_homes_are_inside_the_city_and_keep_the_schedule_ones(self):
-        data = load_instance("real", "m7", num_properties=8, random_seed=17, num_brokers=AUTO_BROKERS,
+        data = load_instance("real", "m1", num_properties=8, random_seed=17, num_brokers=AUTO_BROKERS,
                              city=CITY, neighborhood=NEIGHBORHOOD)
-        schedule = load_instance("real", "m7", num_properties=8, random_seed=17,
+        schedule = load_instance("real", "m1", num_properties=8, random_seed=17,
                                  num_brokers=data["schedule_brokers"], city=CITY, neighborhood=NEIGHBORHOOD)
         hull = self._city_hull(data)
 

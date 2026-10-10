@@ -1,16 +1,16 @@
 """
-Module: model_6
-Description: Mathematical formulation of Model 6 (M6) for the WSRP.
+Module: model_0_6
+Description: Mathematical formulation of M0.6 for the WSRP.
              Implemented as a Fleet Size and Mix Vehicle Routing Problem with Time Windows
-             (FSMVRPTW): the TDVRPTW of M5, where the number of brokers is minimized first
+             (FSMVRPTW): the TDVRPTW of M0.5, where the number of brokers is minimized first
              and their total time out of the base second.
-             The constraints are exactly M5's, so the model is built by M5 and only the
+             The constraints are exactly M0.5's, so the model is built by M0.5 and only the
              objective is replaced.
 """
 
 import pyomo.environ as pyo
 
-from src.models.model_5 import build_model_m5, latest_departure
+from src.models.model_0_5 import build_model_m0_5, latest_departure
 
 
 def compute_fleet_weight(data: dict, time_weight: float) -> float:
@@ -22,7 +22,7 @@ def compute_fleet_weight(data: dict, time_weight: float) -> float:
     plus the slowest trip, so each one is out for at most that long.
 
     Args:
-        data (dict): Instance payload (see build_model_m5).
+        data (dict): Instance payload (see build_model_m0_5).
         time_weight (float): Weight W2 of the time out of the base.
 
     Returns:
@@ -35,12 +35,12 @@ def compute_fleet_weight(data: dict, time_weight: float) -> float:
     return time_weight * data['num_brokers'] * longest_day + 1
 
 
-def build_model_m6(data: dict) -> pyo.ConcreteModel:
+def build_model_m0_6(data: dict) -> pyo.ConcreteModel:
     """
-    Constructs the MILP polyhedron for the M6 routing problem (FSMVRPTW).
+    Constructs the MILP polyhedron for the M0.6 routing problem (FSMVRPTW).
 
     Args:
-        data (dict): The instance parameters of build_model_m5, plus:
+        data (dict): The instance parameters of build_model_m0_5, plus:
             - 'time_weight' (float, optional): Weight W2 of the time out of the base. Defaults to 1.
             - 'fleet_weight' (float, optional): Weight W1 of each broker who leaves the base.
               Computed by compute_fleet_weight if absent.
@@ -48,8 +48,8 @@ def build_model_m6(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    model = build_model_m5(data)
-    model.name = "WSRP_M6_FSMVRPTW"
+    model = build_model_m0_5(data)
+    model.name = "WSRP_M0_6_FSMVRPTW"
 
     # =========================================================================
     # PARAMETERS (Objective weights)
