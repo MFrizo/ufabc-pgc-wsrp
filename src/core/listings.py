@@ -6,12 +6,13 @@ Description: Builds the instance a model runs on, from the synthetic generator o
              the solver, and a broker does not travel from one city to another. The graph
              of the houses is built from listing.address.point.lat and
              listing.address.point.lon, and each visit lasts longer the larger the listing's
-             usable area. Every other feature (homes, time windows, assignments) still
-             comes from the generator.
+             usable area. Each broker's home is drawn at random inside the city, the convex
+             hull of its listings. Every other feature (lunch spots, time windows,
+             assignments) still comes from the generator.
 """
 
 import math
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -105,7 +106,8 @@ def instance_from_catalog(path: str, city: str, neighborhood: str, num_propertie
     if num_properties < 1:
         raise ValueError("num_properties must be at least 1.")
 
-    catalog = select_neighborhood(clean_real_catalog(path), city, neighborhood)
+    full_catalog = clean_real_catalog(path)
+    catalog = select_neighborhood(full_catalog, city, neighborhood)
     if num_properties > len(catalog):
         raise ValueError(f"{neighborhood}, {city} has {len(catalog)} listings, fewer than {num_properties}.")
 
@@ -113,9 +115,15 @@ def instance_from_catalog(path: str, city: str, neighborhood: str, num_propertie
     rng = np.random.default_rng(random_seed)
     chosen = catalog.iloc[rng.choice(len(catalog), size=num_properties, replace=False)].reset_index(drop=True)
 
+    to_map = _map_projection(chosen["lat"].tolist(), chosen["lon"].tolist())
+    in_city = full_catalog.loc[full_catalog["city"].eq(city)]
+    project_logger.info(f"Drawing the broker homes inside {city}, the area of its {len(in_city)} listings.")
     data_payload = generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed,
                                           graph=_house_graph(chosen["lat"].tolist(), chosen["lon"].tolist()),
-                                          areas=chosen["area"].tolist(), **instance_settings)
+                                          areas=chosen["area"].tolist(),
+                                          home_region=_convex_hull([to_map(lat, lon) for lat, lon
+                                                                    in zip(in_city["lat"], in_city["lon"])]),
+                                          **instance_settings)
     data_payload['listings'] = [_listing_record(node, row)
                                 for node, row in enumerate(chosen.itertuples(index=False), start=1)]
     return data_payload
@@ -162,18 +170,57 @@ def _house_graph(latitudes: list[float], longitudes: list[float]) -> dict[str, A
         dict[str, Any]: 'num_nodes', 'coordinates' and the Euclidean 'distance_matrix',
             rounded to 2 decimals like the generator's.
     """
+    to_map = _map_projection(latitudes, longitudes)
+    coordinates = [list(MAP_CENTER)] + [to_map(lat, lon) for lat, lon in zip(latitudes, longitudes)]
+    distance_matrix = [[0.0 if i == j else round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
+                        for j, b in enumerate(coordinates)] for i, a in enumerate(coordinates)]
+    return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix}
+
+
+def _map_projection(latitudes: list[float], longitudes: list[float]) -> Callable[[float, float], list[float]]:
+    """
+    Equirectangular projection onto the generator's map, centered on the houses.
+
+    Args:
+        latitudes (list[float]): Latitude of each house.
+        longitudes (list[float]): Longitude of each house, in the same order.
+
+    Returns:
+        Callable[[float, float], list[float]]: Maps a latitude and a longitude to (x, y): the
+            centroid of the houses at MAP_CENTER, MAP_UNITS_PER_KM units per kilometer, east
+            along x and north along y.
+    """
     origin_lat = sum(latitudes) / len(latitudes)
     origin_lon = sum(longitudes) / len(longitudes)
     km_per_degree_lon = KM_PER_DEGREE_LON * math.cos(math.radians(origin_lat))
 
-    coordinates = [list(MAP_CENTER)] + [
-        [MAP_CENTER[0] + (lon - origin_lon) * km_per_degree_lon * MAP_UNITS_PER_KM,
-         MAP_CENTER[1] + (lat - origin_lat) * KM_PER_DEGREE_LAT * MAP_UNITS_PER_KM]
-        for lat, lon in zip(latitudes, longitudes)
-    ]
-    distance_matrix = [[0.0 if i == j else round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
-                        for j, b in enumerate(coordinates)] for i, a in enumerate(coordinates)]
-    return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix}
+    def to_map(lat: float, lon: float) -> list[float]:
+        return [MAP_CENTER[0] + (lon - origin_lon) * km_per_degree_lon * MAP_UNITS_PER_KM,
+                MAP_CENTER[1] + (lat - origin_lat) * KM_PER_DEGREE_LAT * MAP_UNITS_PER_KM]
+
+    return to_map
+
+
+def _convex_hull(points: list[list[float]]) -> list[list[float]]:
+    """
+    Convex hull of (x, y) points, counter-clockwise, without collinear vertices: the
+    polygon of the region they cover.
+    """
+    unique = sorted({(float(x), float(y)) for x, y in points})
+    if len(unique) <= 2:
+        return [list(point) for point in unique]
+
+    def cross(origin: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (a[1] - origin[1]) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    upper: list[tuple[float, float]] = []
+    for chain, ordered in ((lower, unique), (upper, reversed(unique))):
+        for point in ordered:
+            while len(chain) >= 2 and cross(chain[-2], chain[-1], point) <= 0:
+                chain.pop()
+            chain.append(point)
+    return [list(point) for point in lower[:-1] + upper[:-1]]
 
 
 def _listing_record(node: int, row: Any) -> dict[str, Any]:

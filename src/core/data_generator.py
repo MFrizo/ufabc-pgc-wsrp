@@ -52,7 +52,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            max_day_length: Optional[int] = None,
                            graph: Optional[dict[str, Any]] = None,
                            max_routing_arcs: int = MAX_ROUTING_ARCS,
-                           areas: Optional[list[float]] = None) -> dict[str, Any]:
+                           areas: Optional[list[float]] = None,
+                           home_region: Optional[list[list[float]]] = None) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -96,6 +97,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         areas (Optional[list[float]]): Usable area of each property, in m², in node order from
             1, e.g. of real listings. Each visit then lasts longer the larger the property (see
             _area_service_times) instead of a duration drawn at random.
+        home_region (Optional[list[list[float]]]): (x, y) of the vertices of a convex polygon,
+            e.g. the city of real listings. Each broker's home is then drawn uniformly inside
+            it instead of on the 100x100 map.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -124,7 +128,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             'service_time_variation': service_time_variation, 'speed_profile': speed_profile,
             'working_hours': working_hours, 'start_at_homes': start_at_homes, 'days_off': days_off,
             'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
-            'graph': graph, 'areas': areas,
+            'graph': graph, 'areas': areas, 'home_region': home_region,
         })
 
     num_nodes = num_properties + 1
@@ -146,9 +150,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     else:
         data_payload['service_times'] = _area_service_times(areas, service_time, service_time_variation)
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
-    for prefix, stream in (('home', HOMES_STREAM), ('lunch_spot', LUNCH_SPOTS_STREAM)):
+    for prefix, stream, region in (('home', HOMES_STREAM, home_region), ('lunch_spot', LUNCH_SPOTS_STREAM, None)):
         places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
-                                         travel_time, speed_profile)
+                                         travel_time, speed_profile, region)
         data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
     data_payload['shifts'] = _generate_shifts(random_seed, num_brokers, days_off)
 
@@ -228,9 +232,10 @@ def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs
     data_payload['max_brokers'] = max_brokers
     if num_brokers > schedule_brokers:
         # Places are drawn one broker after another, so the first ones are the schedule's
-        for prefix, stream in (('home', HOMES_STREAM), ('lunch_spot', LUNCH_SPOTS_STREAM)):
+        for prefix, stream, region in (('home', HOMES_STREAM, settings['home_region']),
+                                       ('lunch_spot', LUNCH_SPOTS_STREAM, None)):
             places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
-                                             settings['travel_time'], settings['speed_profile'])
+                                             settings['travel_time'], settings['speed_profile'], region)
             data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
         # The extra brokers all work; the schedule's keep their shifts and days off
         extra_shifts = _generate_shifts(random_seed, num_brokers, 0)[schedule_brokers:]
@@ -388,10 +393,13 @@ def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
 
 
 def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coordinates: list[list[float]],
-                            travel_time: int, speed_profile: Optional[list[tuple[int, float]]]) -> dict[str, Any]:
+                            travel_time: int, speed_profile: Optional[list[tuple[int, float]]],
+                            region: Optional[list[list[float]]] = None) -> dict[str, Any]:
     """
     Places one point per broker (e.g. his home) in the same 100x100 grid map as the nodes,
-    and computes the distance and travel times from it to every node.
+    or uniformly inside region, and computes the distance and travel times from it to every
+    node. Points are drawn one broker after another, so the first ones of a larger fleet
+    are the points of a smaller one.
 
     Args:
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
@@ -401,13 +409,18 @@ def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coo
         travel_time (int): Constant travel time T, used when there is no speed profile.
         speed_profile (Optional[list[tuple[int, float]]]): Periods of the day as (start minute,
             speed in distance units per minute), the first starting at 0.
+        region (Optional[list[list[float]]]): (x, y) of the vertices of a convex polygon the
+            points are drawn in, instead of the 100x100 map.
 
     Returns:
         dict[str, Any]: The coordinates of each broker's place, the distance from it to each
             node and, for each period, the travel time in whole minutes (rounded up) of that trip.
     """
     rng = np.random.default_rng([random_seed, stream])
-    place_coordinates = rng.random((num_brokers, 2)) * 100.0
+    if region is None:
+        place_coordinates = (rng.random((num_brokers, 2)) * 100.0).tolist()
+    else:
+        place_coordinates = _points_in_polygon(rng.random((num_brokers, 3)), region)
 
     distances = [[round(math.hypot(place[0] - node[0], place[1] - node[1]), 2) for node in coordinates]
                  for place in place_coordinates]
@@ -419,10 +432,45 @@ def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coo
                         for _, speed in speed_profile]
 
     return {
-        'coordinates': place_coordinates.tolist(),
+        'coordinates': place_coordinates,
         'distances': distances,
         'travel_times': travel_times
     }
+
+
+def _points_in_polygon(draws: np.ndarray, polygon: list[list[float]]) -> list[list[float]]:
+    """
+    Turns uniform draws into points spread uniformly over a convex polygon.
+
+    The polygon is split into a fan of triangles from its first vertex. The first draw of
+    each row picks a triangle with a chance proportional to its area, the other two a point
+    of that triangle. A polygon with no area (one point, or collinear vertices) is the
+    segment from its first to its last vertex.
+
+    Args:
+        draws (np.ndarray): One row of 3 uniform draws in [0, 1) per point.
+        polygon (list[list[float]]): (x, y) of the vertices of a convex polygon, in order.
+
+    Returns:
+        list[list[float]]: One (x, y) per row of draws.
+    """
+    origin = np.array(polygon[0], dtype=float)
+    triangles = [(origin, np.array(left, dtype=float), np.array(right, dtype=float))
+                 for left, right in zip(polygon[1:-1], polygon[2:])]
+    areas = np.array([abs((left[0] - origin[0]) * (right[1] - origin[1]) - (left[1] - origin[1]) * (right[0] - origin[0]))
+                      for _, left, right in triangles])
+    if not triangles or areas.sum() == 0:
+        end = np.array(polygon[-1], dtype=float)
+        return [(origin + weight * (end - origin)).tolist() for weight, _, _ in draws]
+
+    bounds = np.cumsum(areas) / areas.sum()
+    points = []
+    for pick, r1, r2 in draws:
+        a, b, c = triangles[min(int(np.searchsorted(bounds, pick, side='right')), len(triangles) - 1)]
+        if r1 + r2 > 1:
+            r1, r2 = 1 - r1, 1 - r2
+        points.append((a + r1 * (b - a) + r2 * (c - a)).tolist())
+    return points
 
 
 def _generate_shifts(random_seed: int, num_brokers: int, days_off: int) -> list[list[tuple[int, int]]]:
