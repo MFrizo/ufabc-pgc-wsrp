@@ -30,7 +30,7 @@ Each page lists the sets, parameters, decision variables, objective function and
 - **Time windows** come from a hidden reference schedule that keeps every instance feasible. Within each broker's free time in that schedule, the start of each visit follows a continuous uniform distribution. A share `fixed_ratio` of the visits is booked at its reference start, so $e_i = l_i$. Every other visit is flexible and may start at any time that lets it end within the day: $e_i = 0$ and $l_i = \text{horizon} - s_i$. The agency's window is the whole day, $[0, \text{horizon}]$.
 - **Booked visits:** M0.2 to M0.6, M1 and M2 run with `fixed_ratio = 1.0`, so every visit is booked. M1 and M2 read the booked time as the scheduled start $h_i`, and ignore a `--fixed-ratio` given in `main.py` (`STRICT_TIME_MODELS`). M1.a runs with `fixed_ratio = 0.5` and only gives the booked visits a scheduled start.
 - **Subtours** are eliminated by MTZ order variables in M0.0 and by the start-time variables $w_i$ with Big-M time-flow constraints from M0.1 on.
-- **Capacity:** no model has a vehicle capacity. What a route can serve is limited only by time (time windows, and the day length and shifts of M1, M1.a and M2).
+- **Capacity:** no model has a vehicle capacity. What a route can serve is limited only by time (time windows, and the day length and shifts of M1, M1.a and M2). The decision and the references are in [Capacity](../decisions/capacity.md).
 - **Constraint numbering** on these pages is per model, $(1), (2), \dots$. Each constraint also gives the name of its Pyomo component, which is the stable reference into the code. The `doc` labels in the code (`Constraint 4.1`, `Constraint 5.3`, …) follow an older numbering and differ between models.
 
 ## Instance settings
