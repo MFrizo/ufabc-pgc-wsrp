@@ -5,8 +5,9 @@ Description: Builds the instance a model runs on, from the synthetic generator o
              one neighborhood, then samples that slice: the national file is too large for
              the solver, and a broker does not travel from one city to another. The graph
              of the houses is built from listing.address.point.lat and
-             listing.address.point.lon. Every other feature (visit durations, homes, time
-             windows, assignments) still comes from the generator.
+             listing.address.point.lon, and each visit lasts longer the larger the listing's
+             usable area. Every other feature (homes, time windows, assignments) still
+             comes from the generator.
 """
 
 import math
@@ -114,7 +115,7 @@ def instance_from_catalog(path: str, city: str, neighborhood: str, num_propertie
 
     data_payload = generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed,
                                           graph=_house_graph(chosen["lat"].tolist(), chosen["lon"].tolist()),
-                                          **instance_settings)
+                                          areas=chosen["area"].tolist(), **instance_settings)
     data_payload['listings'] = [_listing_record(node, row)
                                 for node, row in enumerate(chosen.itertuples(index=False), start=1)]
     return data_payload
