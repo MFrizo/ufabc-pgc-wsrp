@@ -14,6 +14,7 @@ Usage:
     python main.py --model m6    # Case 7: FSMVRPTW
     python main.py --model m7    # Case 8.a: MO-DOMDVRPTW-SD
     python main.py --model m8    # Case 8.b: HC-DOMDVRPTW-SD
+    python main.py --model m9 --fixed-ratio 0.25    # Case 8.a with flexible visits: a quarter of them booked
 
     python main.py --model m7 --properties 12 --brokers 4    # Custom instance size
     python main.py --model m7 --properties 12 --brokers auto    # Fleet drawn from the instance
@@ -152,7 +153,8 @@ if __name__ == "__main__":
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
                              "distribution over each broker's free time. m7 and m8 book every visit, so they warn "
-                             "and ignore it (default: the model's own setting)")
+                             "and ignore it; m9 is m7 with this share of the visits booked (default: the model's "
+                             "own setting)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
                         help="Instance source: the synthetic generator, or the real rental catalog of a "
                              "Brazilian real estate company (default: synthetic)")

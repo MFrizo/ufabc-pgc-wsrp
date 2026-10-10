@@ -12,6 +12,7 @@ from src.models.model_5 import build_model_m5
 from src.models.model_6 import build_model_m6
 from src.models.model_7 import build_model_m7, LUNCH_DURATION, LUNCH_WINDOW, MAX_DAY_LENGTH
 from src.models.model_8 import build_model_m8
+from src.models.model_9 import build_model_m9
 
 BUILDERS = {
     'm0': build_model_m0,  # Case 1: TSP
@@ -23,6 +24,7 @@ BUILDERS = {
     'm6': build_model_m6,  # Case 7: FSMVRPTW
     'm7': build_model_m7,  # Case 8.a: MO-DOMDVRPTW-SD
     'm8': build_model_m8,  # Case 8.b: HC-DOMDVRPTW-SD
+    'm9': build_model_m9,  # Case 8.a with flexible visits: MO-DOMDVRPTW-SD, a share of the visits booked
 }
 
 # Models that route a single broker, so they ignore a number of brokers
@@ -55,9 +57,12 @@ INSTANCE_SETTINGS = {
     'm8': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # Case 8.b: own shifts, one broker off
 }
+# M9 is M7's instance with half the visits booked; with fixed_ratio 1.0 it is M7's instance
+INSTANCE_SETTINGS['m9'] = {**INSTANCE_SETTINGS['m7'], 'fixed_ratio': 0.5}
 
 # Seed of each model's default run
 DEFAULT_SEED = 42
 DEFAULT_SEEDS = {
     'm7': 8,  # 2 brokers serve 5 to 7 properties; from 8 on, the third one is needed
+    'm9': 8,  # M7's default instance, apart from the flexible visits
 }

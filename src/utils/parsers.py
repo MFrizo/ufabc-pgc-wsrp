@@ -332,7 +332,8 @@ def print_open_schedules(model: pyo.ConcreteModel) -> None:
             end = start + pyo.value(model_any.service[node])
             scheduled, delay = "", ""
             if node in model_any.C:
-                scheduled = f"{pyo.value(model_any.scheduled[node]):g}"
+                # Flexible visits (M9) have no scheduled start
+                scheduled = f"{pyo.value(model_any.scheduled[node]):g}" if node in model_any.scheduled else "any"
                 delay = f"{pyo.value(model_any.delay[node]):g}"
             print(f"{_node_label(model, node):>4} | {start:>7.2f} | {end:>7.2f} | {scheduled:>9} | {delay:>5}")
 
