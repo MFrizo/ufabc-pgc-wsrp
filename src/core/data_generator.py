@@ -105,16 +105,16 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
             - 'num_nodes', 'coordinates', 'distance_matrix': all models.
-            - 'travel_time': M1 to M4.
-            - 'service_time': M1 to M3.
-            - 'earliest_start', 'latest_start', 'fixed_visits': M1 onwards.
-            - 'num_brokers': M2 onwards.
-            - 'assigned_broker': M3 onwards.
-            - 'service_times': M4 onwards.
-            - 'period_starts', 'travel_times': M5 onwards.
-            - 'home_coordinates', 'home_distances', 'home_travel_times': M7 onwards.
-            - 'shift_start', 'shift_end': M7.
-            - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M8.
+            - 'travel_time': M0.1 to M0.4.
+            - 'service_time': M0.1 to M0.3.
+            - 'earliest_start', 'latest_start', 'fixed_visits': M0.1 onwards.
+            - 'num_brokers': M0.2 onwards.
+            - 'assigned_broker': M0.3 onwards.
+            - 'service_times': M0.4 onwards.
+            - 'period_starts', 'travel_times': M0.5 onwards.
+            - 'home_coordinates', 'home_distances', 'home_travel_times': M1 onwards.
+            - 'shift_start', 'shift_end': M1 and M1.a.
+            - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M2.
             - 'schedule_brokers', 'max_brokers': with AUTO_BROKERS, the range num_brokers was
               drawn from.
 
@@ -189,7 +189,7 @@ def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs
     need to the most the solver can take.
 
     The fewest brokers is the smallest count whose hidden schedule fits the day: the visits
-    fit in the shifts, and the day is no longer than the model's limit (M7's 12 hours) or,
+    fit in the shifts, and the day is no longer than the model's limit (M1's 12 hours) or,
     without one, the horizon. That schedule is a plan those brokers can carry out, so the instance is feasible
     with them. Every model lets a broker stay at home, so it stays feasible with any larger
     fleet; the solver may need fewer.
@@ -274,7 +274,7 @@ def max_fleet(num_properties: int, schedule_brokers: int, days_off: int = 0,
 def _day_length(settings: dict[str, Any]) -> int:
     """
     Longest day the hidden schedule may take, in minutes: the model's own limit when it has
-    one (M7's 12 hours), otherwise the horizon, which the models without a limit only target.
+    one (M1's 12 hours), otherwise the horizon, which the models without a limit only target.
     """
     if settings['max_day_length'] is None:
         return settings['horizon']
@@ -602,7 +602,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             horizon = min(horizon, max_day_length)
 
         if lunch_break is None:
-            # The day is a target, not a constraint: the models before Case 8 have no working-day
+            # The day is a target, not a constraint: the sub-steps M0.0 to M0.6 have no working-day
             # limit, so a day too short for the busiest broker's work is extended to fit it
             horizon = max(horizon, max(_workload(share, first_legs[broker - 1], leg_times, service_times)
                                        for broker, share in broker_shares))

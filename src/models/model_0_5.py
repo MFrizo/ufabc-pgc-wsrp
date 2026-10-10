@@ -1,8 +1,8 @@
 """
-Module: model_5
-Description: Mathematical formulation of Model 5 (M5) for the WSRP.
+Module: model_0_5
+Description: Mathematical formulation of M0.5 for the WSRP.
              Implemented as a Time-Dependent Vehicle Routing Problem with Time Windows
-             (TDVRPTW): the VRPTWWVST of M4, where the travel time of a trip depends on
+             (TDVRPTW): the VRPTWWVST of M0.4, where the travel time of a trip depends on
              the period of the day it leaves in, and the brokers' total time out of the
              base is minimized instead of the distance.
 """
@@ -16,7 +16,7 @@ def latest_departure(data: dict, i: int) -> float:
     the base's window for the base.
 
     Args:
-        data (dict): Instance payload (see build_model_m5).
+        data (dict): Instance payload (see build_model_m0_5).
         i (int): Node index.
 
     Returns:
@@ -36,7 +36,7 @@ def compute_big_m(data: dict) -> float:
     a valid bound.
 
     Args:
-        data (dict): Instance payload (see build_model_m5).
+        data (dict): Instance payload (see build_model_m0_5).
 
     Returns:
         float: The Big-M constant.
@@ -51,9 +51,9 @@ def compute_big_m(data: dict) -> float:
     return max(bound, 0.0)
 
 
-def build_model_m5(data: dict) -> pyo.ConcreteModel:
+def build_model_m0_5(data: dict) -> pyo.ConcreteModel:
     """
-    Constructs the MILP polyhedron for the M5 routing problem (TDVRPTW).
+    Constructs the MILP polyhedron for the M0.5 routing problem (TDVRPTW).
 
     Args:
         data (dict): A dictionary containing instance parameters:
@@ -72,7 +72,7 @@ def build_model_m5(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    model = pyo.ConcreteModel(name="WSRP_M5_TDVRPTW")
+    model = pyo.ConcreteModel(name="WSRP_M0_5_TDVRPTW")
 
     # =========================================================================
     # 1. SETS (Indices)

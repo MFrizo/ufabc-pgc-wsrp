@@ -69,14 +69,14 @@ class VisitTimesTest(unittest.TestCase):
 
     def test_ratio_overrides_the_model_setting(self):
         for dataset, place in (("synthetic", {}), ("real", {"city": "São Paulo", "neighborhood": "Moema"})):
-            data = load_instance(dataset, "m2", num_properties=6, random_seed=3, fixed_ratio=0.5, **place)
+            data = load_instance(dataset, "m0.2", num_properties=6, random_seed=3, fixed_ratio=0.5, **place)
             self.assertEqual(len(data['fixed_visits']), 3)
-        self.assertEqual(len(load_instance("synthetic", "m2", num_properties=6, random_seed=3)['fixed_visits']), 6)
+        self.assertEqual(len(load_instance("synthetic", "m0.2", num_properties=6, random_seed=3)['fixed_visits']), 6)
 
     def test_ratio_outside_zero_to_one_is_rejected(self):
         for ratio in (-0.1, 1.5):
             with self.assertRaises(ValueError):
-                load_instance("synthetic", "m2", fixed_ratio=ratio)
+                load_instance("synthetic", "m0.2", fixed_ratio=ratio)
 
     def test_strict_time_models_warn_and_ignore_the_ratio(self):
         for model in STRICT_TIME_MODELS:
@@ -87,7 +87,7 @@ class VisitTimesTest(unittest.TestCase):
             self.assertEqual(data, load_instance("synthetic", model, num_properties=6, random_seed=3))
 
     def test_models_with_time_windows_solve_a_mixed_instance(self):
-        for model in ('m1', 'm2', 'm3', 'm4', 'm5', 'm6'):
+        for model in ('m0.1', 'm0.2', 'm0.3', 'm0.4', 'm0.5', 'm0.6'):
             data = load_instance("synthetic", model, num_properties=6, random_seed=3, fixed_ratio=0.5)
             _, metrics = solve_model(BUILDERS[model](data), solver_name="gurobi_direct", mip_gap=0.0, raw=True)
             self.assertEqual(metrics['termination_condition'], 'optimal', model)

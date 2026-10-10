@@ -1,23 +1,23 @@
 """
-Module: model_9
-Description: Mathematical formulation of Model 9 (M9) for the WSRP.
-             Model 7 (MO-DOMDVRPTW-SD) with a share of flexible visits: only the visits
+Module: model_1_a
+Description: Mathematical formulation of M1.a for the WSRP.
+             M1 (MO-DOMDVRPTW-SD) with a share of flexible visits: only the visits
              already booked by the visitors have a scheduled start, kept within tol minutes;
              every other visit may start at any time of its window, the whole working day.
-             The share of booked visits is the instance's fixed_ratio, so comparing M9 runs
-             with different ratios, and with M7 (every visit booked), measures how much the
+             The share of booked visits is the instance's fixed_ratio, so comparing M1.a runs
+             with different ratios, and with M1 (every visit booked), measures how much the
              hard schedule weighs on the solver.
 """
 
 import pyomo.environ as pyo
 
-from src.models.model_7 import (DELAY_TOLERANCE, DELAY_WEIGHT, DISTANCE_WEIGHT, LUNCH_DURATION, LUNCH_WINDOW,
+from src.models.model_1 import (DELAY_TOLERANCE, DELAY_WEIGHT, DISTANCE_WEIGHT, LUNCH_DURATION, LUNCH_WINDOW,
                                 MAX_DAY_LENGTH, OVERTIME_WEIGHT)
 
 
-def build_model_m9(data: dict) -> pyo.ConcreteModel:
+def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     """
-    Constructs the MILP polyhedron for the M9 routing problem (M7 with flexible visits).
+    Constructs the MILP polyhedron for the M1.a routing problem (M1 with flexible visits).
 
     Args:
         data (dict): A dictionary containing instance parameters:
@@ -44,7 +44,7 @@ def build_model_m9(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    model = pyo.ConcreteModel(name="WSRP_M9_MO_DOMDVRPTW_SD_FLEXIBLE")
+    model = pyo.ConcreteModel(name="WSRP_M1_A_MO_DOMDVRPTW_SD_FLEXIBLE")
 
     num_properties = data['num_nodes'] - 1
     num_brokers = data['num_brokers']

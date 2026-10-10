@@ -1,15 +1,15 @@
 """
-Module: module_0
-Description: Mathematical formulation of the Base Model (M0) for the WSRP.
+Module: model_0_0
+Description: Mathematical formulation of the Base Model (M0.0) for the WSRP.
              Implemented as a single-broker closed route Traveling Salesman
              Problem (TSP) using the Miller-Tucker-Zemlin (MTZ) formulation.
 """
 
 import pyomo.environ as pyo
 
-def build_model_m0(data: dict) -> pyo.ConcreteModel:
+def build_model_m0_0(data: dict) -> pyo.ConcreteModel:
     """
-    Constructs the MILP polyhedron for the M0 routing problem (TSP).
+    Constructs the MILP polyhedron for the M0.0 routing problem (TSP).
 
     Args:
         data (dict): A dictionary containing instance parameters:
@@ -19,7 +19,7 @@ def build_model_m0(data: dict) -> pyo.ConcreteModel:
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
     """
-    model = pyo.ConcreteModel(name="WSRP_Base_M0_TSP")
+    model = pyo.ConcreteModel(name="WSRP_M0_0_TSP")
 
     # =========================================================================
     # 1. SETS (Indices)
