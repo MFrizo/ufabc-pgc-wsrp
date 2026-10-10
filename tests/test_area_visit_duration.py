@@ -13,9 +13,9 @@ from src.solvers.engine import solve_model
 
 class AreaVisitDurationTest(unittest.TestCase):
     def test_duration_grows_with_the_area_within_the_range(self):
-        durations = _area_service_times([0, 10, 60, 120, AREA_REFERENCE, 500, 1000], 60, 30)
+        durations = _area_service_times([0, 10, 60, 120, 240, 500, AREA_REFERENCE, 5000], 60, 30)
 
-        self.assertEqual(durations, [0, 30, 32, 45, 60, 90, 90, 90])
+        self.assertEqual(durations, [0, 30, 31, 34, 37, 44, 60, 90, 90])
         self.assertEqual(durations, [0] + sorted(durations[1:]))
 
     def test_without_variation_every_visit_lasts_s(self):

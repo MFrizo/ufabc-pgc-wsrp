@@ -21,9 +21,10 @@ LUNCH_SPOTS_STREAM = 5
 SHIFTS_STREAM = 6
 FLEET_STREAM = 7
 
-# Usable area, in m², of the longest visit when the durations follow the areas. About the
-# 80th percentile of the real catalog; larger properties take that long too.
-AREA_REFERENCE = 240
+# Usable area, in m², of the longest visit when the durations follow the areas. The
+# largest area the real catalog keeps (MAX_AREA of src.utils.real_catalog), so every
+# listing gets a duration of its own; larger areas take that long too.
+AREA_REFERENCE = 1000
 
 # num_brokers value that draws the fleet from the instance instead of fixing it
 AUTO_BROKERS = "auto"
