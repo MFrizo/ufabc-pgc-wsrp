@@ -1,6 +1,6 @@
 # Capacity
 
-Decision on whether the complete models need a vehicle capacity, in the sense of the Capacitated Vehicle Routing Problem (CVRP). This note covers m1 and m2. m1 was M7 and m2 was M8 before the renumbering. m1.a copies m1's working-day limit, so the same wording covers it. No capacity constraint was added to the code.
+Decision on whether the complete models need a vehicle capacity, in the sense of the Capacitated Vehicle Routing Problem (CVRP). This note covers m1 and m2. m1 was M7 and m2 was M8 before the renumbering. m1.a copies m1's working-day limit, so the same wording covers it. No capacity constraint was added to the code. The other open decisions from the same discussion are in [Work in progress](wip.md).
 
 ## Decision
 
