@@ -25,11 +25,10 @@ FLEET_STREAM = 7
 AUTO_BROKERS = "auto"
 
 # Most routing arcs (brokers x arcs between the nodes) an automatic fleet may give the solver.
-# The bound is memory, not time: building a model and loading it in Gurobi takes 6 to 20 KB
-# per arc (M5 and M6 the most), so about 2.3 GB here, which leaves most of a 12 GB Colab
-# runtime to the search tree. A constant, not the free memory, keeps a seed's fleet the
-# same on every machine.
-MAX_ROUTING_ARCS = 150_000
+# The bound is memory, not time: 225 properties with 44 brokers, about 2.24 million arcs,
+# solved without running out of memory. A constant, not the free memory, keeps a seed's
+# fleet the same on every machine.
+MAX_ROUTING_ARCS = 2_250_000
 
 # Range of the start and of the end of each broker's shifts, in minutes from 08:00
 MORNING_SHIFT = ((0, 60), (210, 270))           # Starts 08:00 to 09:00, ends 11:30 to 12:30
@@ -169,8 +168,8 @@ def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs
     need to the most the solver can take.
 
     The fewest brokers is the smallest count whose hidden schedule fits the day: the visits
-    fit in the shifts and in the longest working day, and the day is not extended past the
-    horizon. That schedule is a plan those brokers can carry out, so the instance is feasible
+    fit in the shifts, and the day is no longer than the model's limit (M7's 12 hours) or,
+    without one, the horizon. That schedule is a plan those brokers can carry out, so the instance is feasible
     with them. Every model lets a broker stay at home, so it stays feasible with any larger
     fleet; the solver may need fewer.
 
@@ -251,10 +250,13 @@ def max_fleet(num_properties: int, schedule_brokers: int, days_off: int = 0,
 
 
 def _day_length(settings: dict[str, Any]) -> int:
-    """Length of the day the hidden schedule should fit without being extended, in minutes."""
+    """
+    Longest day the hidden schedule may take, in minutes: the model's own limit when it has
+    one (M7's 12 hours), otherwise the horizon, which the models without a limit only target.
+    """
     if settings['max_day_length'] is None:
         return settings['horizon']
-    return min(settings['horizon'], settings['max_day_length'])
+    return settings['max_day_length']
 
 
 def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:

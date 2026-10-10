@@ -48,7 +48,7 @@ class AutoBrokersTest(unittest.TestCase):
                 if fewer <= INSTANCE_SETTINGS[model].get('days_off', 0):
                     continue
                 settings = INSTANCE_SETTINGS[model]
-                day = min(settings.get('horizon', 600), settings.get('max_day_length') or 600)
+                day = settings.get('max_day_length') or settings.get('horizon', 600)
                 try:
                     smaller = fixed(model, 12, seed, fewer)
                 except ValueError:
