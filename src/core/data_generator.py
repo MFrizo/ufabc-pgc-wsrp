@@ -21,6 +21,10 @@ LUNCH_SPOTS_STREAM = 5
 SHIFTS_STREAM = 6
 FLEET_STREAM = 7
 
+# Usable area, in m², of the longest visit when the durations follow the areas. About the
+# 80th percentile of the real catalog; larger properties take that long too.
+AREA_REFERENCE = 240
+
 # num_brokers value that draws the fleet from the instance instead of fixing it
 AUTO_BROKERS = "auto"
 
@@ -46,7 +50,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            lunch_break: Optional[tuple[int, int, int]] = None,
                            max_day_length: Optional[int] = None,
                            graph: Optional[dict[str, Any]] = None,
-                           max_routing_arcs: int = MAX_ROUTING_ARCS) -> dict[str, Any]:
+                           max_routing_arcs: int = MAX_ROUTING_ARCS,
+                           areas: Optional[list[float]] = None) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -87,6 +92,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             listings. Every other feature is still generated.
         max_routing_arcs (int): Most brokers x arcs between the nodes an AUTO_BROKERS fleet may
             give the solver. Not used with a fixed num_brokers.
+        areas (Optional[list[float]]): Usable area of each property, in m², in node order from
+            1, e.g. of real listings. Each visit then lasts longer the larger the property (see
+            _area_service_times) instead of a duration drawn at random.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -106,7 +114,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
 
     Raises:
         ValueError: If the visits don't fit in the shifts, or in the longest working day, or
-            the graph does not have num_properties + 1 nodes.
+            the graph does not have num_properties + 1 nodes, or areas num_properties values.
     """
     if num_brokers == AUTO_BROKERS:
         return _auto_fleet_instance(num_properties, random_seed, max_routing_arcs, {
@@ -115,7 +123,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             'service_time_variation': service_time_variation, 'speed_profile': speed_profile,
             'working_hours': working_hours, 'start_at_homes': start_at_homes, 'days_off': days_off,
             'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
-            'graph': graph,
+            'graph': graph, 'areas': areas,
         })
 
     num_nodes = num_properties + 1
@@ -129,8 +137,13 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
     data_payload['num_brokers'] = num_brokers
     data_payload['travel_time'] = travel_time
     data_payload['service_time'] = service_time
-    data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
-                                                            service_time_variation)
+    if areas is None:
+        data_payload['service_times'] = _generate_service_times(num_nodes, random_seed, service_time,
+                                                                service_time_variation)
+    elif len(areas) != num_properties:
+        raise ValueError(f"There are {len(areas)} areas for {num_properties} properties.")
+    else:
+        data_payload['service_times'] = _area_service_times(areas, service_time, service_time_variation)
     data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
     for prefix, stream in (('home', HOMES_STREAM), ('lunch_spot', LUNCH_SPOTS_STREAM)):
         places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
@@ -318,6 +331,29 @@ def _generate_service_times(num_nodes: int, random_seed: int, service_time: int,
                              size=num_nodes - 1)
 
     return [0] + [int(duration) for duration in durations]
+
+
+def _area_service_times(areas: list[float], service_time: int, service_time_variation: int) -> list[int]:
+    """
+    Duration of every visit from the usable area of its property, in the same range
+    [S - variation, S + variation] as the drawn durations.
+
+    The duration grows linearly from S - variation at 0 m² to S + variation at
+    AREA_REFERENCE m², and stays at S + variation for larger properties. With no
+    variation, every visit lasts S.
+
+    Args:
+        areas (list[float]): Usable area of each property, in m², in node order from 1.
+        service_time (int): Mean visit duration S, in minutes.
+        service_time_variation (int): Max distance of a duration from S, in minutes.
+
+    Returns:
+        list[int]: The duration s_i of the visit at each node, with s_0 = 0 at the depot.
+    """
+    shortest = service_time - service_time_variation
+    longest = service_time + service_time_variation
+    return [0] + [round(shortest + min(max(area, 0.0), AREA_REFERENCE) / AREA_REFERENCE * (longest - shortest))
+                  for area in areas]
 
 
 def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
