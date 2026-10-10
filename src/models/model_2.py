@@ -6,7 +6,8 @@ Description: Mathematical formulation of M2 for the WSRP.
              brokers: each broker works his own morning shift, from home to the place he
              picks for lunch, and afternoon shift, from there back home, and no visit goes
              past the end of a shift. A weighted sum of the distance, which includes the trip
-             from the last visit of each shift to its destination, and of the delays is minimized.
+             from the last visit of each shift to its destination, of the delays, and of the
+             longest time a working broker is out, is minimized.
              Models the initial optimization of the day; re-running it when the visits
              change, from the brokers' current positions, is up to the caller.
 """
@@ -19,6 +20,7 @@ DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 # Default weights of the multi-objective function
 DISTANCE_WEIGHT = 1.0           # W_dist: Standard weight of the distance
 DELAY_WEIGHT = 10.0             # W_atraso: Penalty per minute of delay
+FAIRNESS_WEIGHT = 10.0          # W_fair: Penalty per minute of the busiest working broker's time out
 
 
 def build_model_m2(data: dict) -> pyo.ConcreteModel:
@@ -42,7 +44,9 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
             - 'service_times' (list): Duration s_i of the visit at every property.
             - 'earliest_start' (list): Scheduled start h_i of the visit at every property.
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
-            - 'distance_weight', 'delay_weight' (float, optional): Weights of the objective.
+            - 'distance_weight', 'delay_weight', 'fairness_weight' (float, optional): Weights of
+              the objective. fairness_weight charges each minute of the longest time a broker
+              who works is out. 0 turns that term off.
 
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
@@ -166,9 +170,10 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
                      + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
     model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
 
-    # W_dist, W_atraso: Weights of the distance and of the delays
+    # W_dist, W_atraso, W_fair: Weights of the distance, the delays and the longest time out
     model.distance_weight = pyo.Param(initialize=data.get('distance_weight', DISTANCE_WEIGHT), doc="W_dist")
     model.delay_weight = pyo.Param(initialize=data.get('delay_weight', DELAY_WEIGHT), doc="W_atraso")
+    model.fairness_weight = pyo.Param(initialize=data.get('fairness_weight', FAIRNESS_WEIGHT), doc="W_fair")
 
     # =========================================================================
     # 3. DECISION VARIABLES
@@ -182,16 +187,28 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     # atraso_i >= 0: Minutes of delay of the visit at property i
     model.delay = pyo.Var(model.C, domain=pyo.NonNegativeReals, doc="Delay atraso_i")
 
+    # sigma_tk >= 0: Minutes the broker is out on shift t_k, from leaving its origin to
+    # arriving at its destination. A shift that does no visit contributes nothing.
+    model.shift_span = pyo.Var(model.R, domain=pyo.NonNegativeReals, doc="Shift span sigma_tk")
+
+    # omega_k >= 0: Workload of broker k, the sum of his shift spans. A day off is 0.
+    model.workload = pyo.Var(model.K, domain=pyo.NonNegativeReals, doc="Workload omega_k")
+
+    # Omega >= 0: Longest workload among the brokers who work
+    model.max_workload = pyo.Var(domain=pyo.NonNegativeReals, doc="Longest workload Omega")
+
     # =========================================================================
     # 4. OBJECTIVE FUNCTION
     # =========================================================================
     def objective_rule(model_instance):
-        """Minimize W_dist * sum(c_ij * x_ijtk) + W_atraso * sum(atraso_i)."""
+        """Minimize W_dist * sum(c_ij * x_ijtk) + W_atraso * sum(atraso_i) + W_fair * Omega."""
         return (model_instance.distance_weight * sum(model_instance.distance[arc] * model_instance.x[arc]
                                                      for arc in model_instance.ARCS)
-                + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C))
+                + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C)
+                + model_instance.fairness_weight * model_instance.max_workload)
 
-    model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize, doc="Minimize weighted distance and delays")
+    model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize,
+                              doc="Minimize weighted distance, delays and the longest workload")
 
     # =========================================================================
     # 5. CONSTRAINTS
@@ -268,5 +285,34 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
 
     model.shift_start_constraint = pyo.Constraint(model.R, rule=shift_start_rule, doc="Constraint 5.5 start")
     model.shift_end_constraint = pyo.Constraint(model.C, model.R, rule=shift_end_rule, doc="Constraint 5.5 end")
+
+    # 5.6 Workload fairness: a broker's workload is the time he is out on the shifts he
+    # actually runs. The objective penalizes the longest such workload. A broker on his
+    # day off has no shifts, so his zero is not part of that maximum.
+    # Formula: sigma_tk >= w_ftk - w_dtk - M * (1 - sum_j x_dtk,j,tk),
+    #          omega_k = sum of his sigma, Omega >= omega_k
+    shifts_of = {}
+    for route in model.R:
+        shifts_of.setdefault(pyo.value(model.route_broker[route]), []).append(route)
+
+    def shift_span_rule(model_instance, r):
+        departs = sum(arcs_from(model_instance, model_instance.depot[r], r))
+        return (model_instance.shift_span[r] >= model_instance.w[model_instance.end[r]]
+                - model_instance.w[model_instance.depot[r]] - model_instance.big_m * (1 - departs))
+
+    def workload_rule(model_instance, k):
+        shifts = shifts_of.get(k, [])
+        if not shifts:
+            return model_instance.workload[k] == 0
+        return model_instance.workload[k] == sum(model_instance.shift_span[r] for r in shifts)
+
+    def max_workload_rule(model_instance, k):
+        if k not in shifts_of:
+            return pyo.Constraint.Skip
+        return model_instance.max_workload >= model_instance.workload[k]
+
+    model.shift_span_constraint = pyo.Constraint(model.R, rule=shift_span_rule, doc="Constraint 5.6 span")
+    model.workload_constraint = pyo.Constraint(model.K, rule=workload_rule, doc="Constraint 5.6 workload")
+    model.max_workload_constraint = pyo.Constraint(model.K, rule=max_workload_rule, doc="Constraint 5.6 max")
 
     return model
