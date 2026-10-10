@@ -25,6 +25,9 @@ BUILDERS = {
     'm8': build_model_m8,  # Case 8.b: HC-DOMDVRPTW-SD
 }
 
+# Models that route a single broker, so they ignore a number of brokers
+SINGLE_BROKER_MODELS = ('m0', 'm1')
+
 # Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day
 RUSH_HOURS = [(0, 1.0), (120, 2.0), (540, 1.0)]
 

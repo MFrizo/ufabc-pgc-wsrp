@@ -17,8 +17,10 @@ Usage:
 
     python main.py --model m7 --properties 12 --brokers 4    # Custom instance size
     python main.py --model m7 --properties 12 --brokers auto    # Fleet drawn from the instance
+    python main.py --model m7 --seed 7    # Another reproducible instance
 
     python main.py --model m7 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
+    python main.py --model m7 --dataset real --city "São Paulo"    # Real listings of the whole city
 """
 
 import argparse
@@ -27,39 +29,47 @@ from typing import Optional, Union
 from src.utils.logger import project_logger
 from src.core.data_generator import AUTO_BROKERS
 from src.core.listings import DATASETS, load_instance
-from src.models import BUILDERS, DEFAULT_SEED, DEFAULT_SEEDS, INSTANCE_SETTINGS
+from src.models import BUILDERS, DEFAULT_SEED, DEFAULT_SEEDS, INSTANCE_SETTINGS, SINGLE_BROKER_MODELS
 from src.solvers.engine import solve_model
 from src.utils.parsers import print_results
 
 
 def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = None,
-         dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None):
+         dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None,
+         random_seed: Optional[int] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
     Args:
         model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0', 'm1', 'm2').
         num_properties (int): Number of properties to visit.
-        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M2 onwards.
-            "auto" draws it between the fewest brokers the visits need and the most the solver
-            can take. None keeps the model's own setting in src.models.INSTANCE_SETTINGS.
+        num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M2 onwards;
+            m0 and m1 warn and ignore it. "auto" draws it between the fewest brokers the visits
+            need and the most the solver can take. None keeps the model's own setting in
+            src.models.INSTANCE_SETTINGS.
         dataset (str): "synthetic" for the generator, "real" for the real rental catalog.
         city (Optional[str]): City of the real listings. Required when dataset is "real".
-        neighborhood (Optional[str]): Neighborhood of the real listings, inside that city.
-            Required when dataset is "real".
+        neighborhood (Optional[str]): Neighborhood of the real listings, inside that city. None
+            samples the whole city.
+        random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
+            src.models.DEFAULT_SEEDS or DEFAULT_SEED.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
     # ---------------------------------------------------------
     # PHASE 1: Data Ingestion
     # ---------------------------------------------------------
-    brokers = num_brokers if num_brokers is not None else INSTANCE_SETTINGS[model_version].get('num_brokers', 1)
+    if random_seed is None:
+        random_seed = DEFAULT_SEEDS.get(model_version, DEFAULT_SEED)
+    if model_version in SINGLE_BROKER_MODELS or num_brokers is None:
+        brokers = INSTANCE_SETTINGS[model_version].get('num_brokers', 1)
+    else:
+        brokers = num_brokers
     project_logger.info(f"PHASE 1: Ingesting {dataset} dataset ({num_properties} properties + 1 Depot, "
-                        f"{brokers} brokers)...")
-    random_seed = DEFAULT_SEEDS.get(model_version, DEFAULT_SEED)
+                        f"{brokers} brokers, seed {random_seed})...")
     data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
                                  num_brokers=num_brokers, city=city, neighborhood=neighborhood)
-    if num_brokers == AUTO_BROKERS:
+    if 'schedule_brokers' in data_payload:
         project_logger.info(f"Fleet drawn: {data_payload['num_brokers']} brokers, between "
                             f"{data_payload['schedule_brokers']} (fewest the visits need) and "
                             f"{data_payload['max_brokers']} (most the solver takes).")
@@ -113,17 +123,22 @@ if __name__ == "__main__":
     parser.add_argument('--properties', type=int, default=5,
                         help="Number of properties to visit (default: 5)")
     parser.add_argument('--brokers', type=_brokers, default=None,
-                        help="Number of brokers, read from M2 onwards, or 'auto' to draw it between the fewest "
-                             "the visits need and the most the solver takes (default: the model's own setting)")
+                        help="Number of brokers, read from M2 onwards (m0 and m1 warn and ignore it), or 'auto' "
+                             "to draw it between the fewest the visits need and the most the solver takes "
+                             "(default: the model's own setting)")
+    parser.add_argument('--seed', type=int, default=None,
+                        help=f"Seed of the instance; each seed is another reproducible instance "
+                             f"(default: the model's own, {DEFAULT_SEED}, or "
+                             + ", ".join(f"{seed} for {model}" for model, seed in DEFAULT_SEEDS.items()) + ")")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
                         help="Instance source: the synthetic generator, or the real rental catalog of a "
                              "Brazilian real estate company (default: synthetic)")
     parser.add_argument('--city', default=None,
                         help="City of the real listings. Required with --dataset real")
     parser.add_argument('--neighborhood', default=None,
-                        help="Neighborhood of the real listings, inside --city. Required with --dataset real")
+                        help="Neighborhood of the real listings, inside --city (default: the whole city)")
     args = parser.parse_args()
-    if args.dataset == 'real' and (not args.city or not args.neighborhood):
-        parser.error("--dataset real requires --city and --neighborhood")
+    if args.dataset == 'real' and not args.city:
+        parser.error("--dataset real requires --city")
     main(args.model, num_properties=args.properties, num_brokers=args.brokers, dataset=args.dataset,
-         city=args.city, neighborhood=args.neighborhood)
+         city=args.city, neighborhood=args.neighborhood, random_seed=args.seed)

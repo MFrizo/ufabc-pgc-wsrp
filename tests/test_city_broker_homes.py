@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 
 from src.core.data_generator import AUTO_BROKERS, _points_in_polygon
-from src.core.listings import MAP_CENTER, MAP_UNITS_PER_KM, _convex_hull, _map_projection, load_instance, select_neighborhood
+from src.core.listings import MAP_CENTER, MAP_UNITS_PER_KM, _convex_hull, _map_projection, load_instance, select_listings
 from src.utils.real_catalog import REAL_CATALOG, clean_real_catalog
 
 CITY, NEIGHBORHOOD = "São Paulo", "Moema"
@@ -41,7 +41,7 @@ class CityBrokerHomesTest(unittest.TestCase):
                 self.assertTrue(_inside(home, hull), f"seed {seed}: home {home} is outside {CITY}")
 
     def test_homes_spread_over_the_city_not_the_neighborhood(self):
-        moema = select_neighborhood(self.catalog, CITY, NEIGHBORHOOD)
+        moema = select_listings(self.catalog, CITY, NEIGHBORHOOD)
         to_map = _map_projection(moema["lat"].tolist(), moema["lon"].tolist())
         moema_radius = max(math.dist(MAP_CENTER, to_map(lat, lon)) for lat, lon in zip(moema["lat"], moema["lon"]))
         farthest = max(math.dist(MAP_CENTER, home)
