@@ -5,9 +5,10 @@ Description: Mathematical formulation of M2 for the WSRP.
              with Soft Time Windows and Site-Dependency (HC-DOMDVRPTW-SD), focused on the
              brokers: each broker works his own morning shift, from home to the place he
              picks for lunch, and afternoon shift, from there back home, and no visit goes
-             past the end of a shift. A weighted sum of the distance, which includes the trip
+             past the end of a shift. A weighted sum of the travel time, which includes the trip
              from the last visit of each shift to its destination, of the delays, and of the
-             longest time a working broker is out, is minimized.
+             longest time a working broker is out, is minimized. Distance only breaks ties
+             between plans with the same time.
              Models the initial optimization of the day; re-running it when the visits
              change, from the brokers' current positions, is up to the caller.
 """
@@ -15,13 +16,12 @@ Description: Mathematical formulation of M2 for the WSRP.
 import pyomo.environ as pyo
 
 from src.models.blocked import forbid_blocked_arcs
+from src.models.model_1 import DELAY_WEIGHT, TRAVEL_WEIGHT, tie_break_distance_weight
 
 # Rules of M2, in minutes
 DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 
 # Default weights of the multi-objective function
-DISTANCE_WEIGHT = 1.0           # W_dist: Standard weight of the distance
-DELAY_WEIGHT = 10.0             # W_atraso: Penalty per minute of delay
 FAIRNESS_WEIGHT = 10.0          # W_fair: Penalty per minute of the busiest working broker's time out
 
 
@@ -46,9 +46,10 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
             - 'service_times' (list): Duration s_i of the visit at every property.
             - 'earliest_start' (list): Scheduled start h_i of the visit at every property.
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
-            - 'distance_weight', 'delay_weight', 'fairness_weight' (float, optional): Weights of
-              the objective. fairness_weight charges each minute of the longest time a broker
-              who works is out. 0 turns that term off.
+            - 'travel_weight', 'distance_weight', 'delay_weight', 'fairness_weight' (float, optional):
+              Weights of the objective. fairness_weight charges each minute of the longest time
+              a broker who works is out. 0 turns that term off. The distance weight, if absent,
+              only breaks ties between plans whose travel time, delay and workload are equal.
 
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
@@ -172,8 +173,14 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
                      + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
     model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
 
-    # W_dist, W_atraso, W_fair: Weights of the distance, the delays and the longest time out
-    model.distance_weight = pyo.Param(initialize=data.get('distance_weight', DISTANCE_WEIGHT), doc="W_dist")
+    # W_time, W_dist, W_atraso, W_fair: Weights of the driving time, the distance tie-break,
+    # the delays and the longest time out. Each property is left once, and each shift leaves
+    # its origin at most once.
+    paid_arcs = num_properties + num_routes
+    max_distance = max(pyo.value(model.distance[arc]) for arc in model.ARCS)
+    model.travel_weight = pyo.Param(initialize=data.get('travel_weight', TRAVEL_WEIGHT), doc="W_time")
+    model.distance_weight = pyo.Param(
+        initialize=data.get('distance_weight', tie_break_distance_weight(paid_arcs, max_distance)), doc="W_dist")
     model.delay_weight = pyo.Param(initialize=data.get('delay_weight', DELAY_WEIGHT), doc="W_atraso")
     model.fairness_weight = pyo.Param(initialize=data.get('fairness_weight', FAIRNESS_WEIGHT), doc="W_fair")
 
@@ -203,14 +210,16 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     # 4. OBJECTIVE FUNCTION
     # =========================================================================
     def objective_rule(model_instance):
-        """Minimize W_dist * sum(c_ij * x_ijtk) + W_atraso * sum(atraso_i) + W_fair * Omega."""
-        return (model_instance.distance_weight * sum(model_instance.distance[arc] * model_instance.x[arc]
-                                                     for arc in model_instance.ARCS)
+        """Minimize W_time * sum(t_ij * x_ijtk) + W_dist * sum(c_ij * x_ijtk) + W_atraso * sum(atraso_i) + W_fair * Omega."""
+        return (model_instance.travel_weight * sum(model_instance.travel_time[arc] * model_instance.x[arc]
+                                                   for arc in model_instance.ARCS)
+                + model_instance.distance_weight * sum(model_instance.distance[arc] * model_instance.x[arc]
+                                                       for arc in model_instance.ARCS)
                 + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C)
                 + model_instance.fairness_weight * model_instance.max_workload)
 
     model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize,
-                              doc="Minimize weighted distance, delays and the longest workload")
+                              doc="Minimize travel time, delays and the longest workload")
 
     # =========================================================================
     # 5. CONSTRAINTS

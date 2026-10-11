@@ -1,8 +1,8 @@
 """
 Checks the workload term of M2: the longest time a working broker is out.
 
-Two properties sit next to broker 1 and a long way from broker 2, so distance alone
-gives both visits to broker 1. Each visit takes long enough that splitting them
+Two properties sit next to broker 1 and a long way from broker 2. Travel times equal
+the distances, so travel time alone gives both visits to broker 1. Each visit takes long enough that splitting them
 shortens the busiest day, and the fairness weight does that split. Broker 3 is off.
 """
 

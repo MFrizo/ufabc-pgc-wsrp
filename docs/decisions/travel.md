@@ -1,6 +1,6 @@
 # Distances and travel times
 
-This note records how $c_{ij}$ and $t_{ij}$ are built. The matrices are fixed before the MILP is written, so a seed still rebuilds the same model with no network call. The objective still minimizes distance. Switching that term to travel time is a separate open decision, in [Work in progress](wip.md).
+This note records how $c_{ij}$ and $t_{ij}$ are built. The matrices are fixed before the MILP is written, so a seed still rebuilds the same model with no network call. M1, M1.a and M2 minimize travel time. Distance only breaks a tie, as on their model pages.
 
 The code is `src/core/travel.py` and the generator in `src/core/data_generator.py`. The numbers that the solver reads are `data/travel/detour_factor.json` and `data/travel/sao_paulo.json` (the matrix is `data/travel/sao_paulo.npz`). The shared conventions are on the [model pages](../models/README.md).
 
@@ -68,7 +68,7 @@ With these São Paulo factors the step that can break FIFO is the morning period
 
 Live traffic, GPS traces and a random travel time are future work. A stochastic travel time of the kind in Taş, Dellaert, van Woensel and de Kok (2013) is the reference for that paragraph. The cached durations stay free-flow shortest paths times the three factors above.
 
-The street distances do not change what the objective minimizes. M0.0 through M0.4, M1, M1.a and M2 still minimize distance. M0.5 still minimizes time out of the agency, and M0.6 the fleet and then that time. Whether the distance term should become travel time is [Work in progress](wip.md).
+M0.0 through M0.4 minimize distance. M0.5 minimizes time out of the agency, and M0.6 the fleet and then that time. M1, M1.a and M2 minimize travel time, with a distance weight too small to outweigh one minute of driving.
 
 ## What the thesis can claim
 
