@@ -68,7 +68,7 @@ class VisitTimesTest(unittest.TestCase):
         self.assertTrue((starts[:, -1] + 40 <= SLACK + 5 * 40).all())
 
     def test_ratio_overrides_the_model_setting(self):
-        for dataset, place in (("synthetic", {}), ("real", {"city": "São Paulo", "neighborhood": "Moema"})):
+        for dataset, place in (("synthetic", {}), ("real", {"city": "São Paulo"})):
             data = load_instance(dataset, "m0.2", num_properties=6, random_seed=3, fixed_ratio=0.5, **place)
             self.assertEqual(len(data['fixed_visits']), 3)
         self.assertEqual(len(load_instance("synthetic", "m0.2", num_properties=6, random_seed=3)['fixed_visits']), 6)

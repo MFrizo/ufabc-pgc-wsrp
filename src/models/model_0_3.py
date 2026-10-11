@@ -8,6 +8,8 @@ Description: Mathematical formulation of M0.3 for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
+
 from src.models.model_0_1 import compute_big_m
 
 
@@ -162,4 +164,5 @@ def build_model_m0_3(data: dict) -> pyo.ConcreteModel:
 
     model.no_self_loop_constraint = pyo.Constraint(model.V, model.K, rule=no_self_loop_rule, doc="No self-loops")
 
+    forbid_blocked_arcs(model, data)
     return model

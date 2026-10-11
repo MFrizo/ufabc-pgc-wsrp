@@ -28,7 +28,7 @@ class RealInstancesTest(unittest.TestCase):
             self.assertEqual(listing["district"], "Moema")
 
     def test_house_graph_follows_listing_coordinates(self):
-        data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo", neighborhood="Moema")
+        data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo")
         listings = data["listings"]
         to_map = _map_projection([listing["lat"] for listing in listings], [listing["lon"] for listing in listings])
 
@@ -37,8 +37,8 @@ class RealInstancesTest(unittest.TestCase):
             self.assertEqual(data["coordinates"][listing["node"]], to_map(listing["lat"], listing["lon"]))
         self.assertIn("duration_matrix", data)
 
-    def test_m1_solves_a_real_neighborhood(self):
-        data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo", neighborhood="Moema")
+    def test_m1_solves_sao_paulo(self):
+        data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo")
 
         solved_model, metrics = solve_model(build_model_m1(data), solver_name="gurobi_direct", mip_gap=0.0, raw=True)
         self.assertEqual(metrics["termination_condition"], "optimal")
@@ -47,7 +47,7 @@ class RealInstancesTest(unittest.TestCase):
     def test_real_instance_needs_a_city(self):
         for city in (None, "", " "):
             with self.assertRaises(ValueError):
-                load_instance("real", "m1", city=city, neighborhood="Moema")
+                load_instance("real", "m1", city=city)
 
     def test_without_a_neighborhood_the_sample_comes_from_the_whole_city(self):
         city = select_listings(clean_real_catalog(REAL_CATALOG), "São Paulo")
@@ -81,8 +81,7 @@ class RealInstancesTest(unittest.TestCase):
 
     def test_num_brokers_overrides_the_model_setting(self):
         self.assertEqual(load_instance("synthetic", "m0.2", num_brokers=4)["num_brokers"], 4)
-        data = load_instance("real", "m1", num_properties=5, random_seed=17, num_brokers=2,
-                             city="São Paulo", neighborhood="Moema")
+        data = load_instance("real", "m1", num_properties=5, random_seed=17, num_brokers=2, city="São Paulo")
         self.assertEqual(data["num_brokers"], 2)
         self.assertEqual(len(data["home_coordinates"]), 2)
 

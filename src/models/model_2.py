@@ -14,6 +14,8 @@ Description: Mathematical formulation of M2 for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
+
 # Rules of M2, in minutes
 DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 
@@ -315,4 +317,5 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     model.workload_constraint = pyo.Constraint(model.K, rule=workload_rule, doc="Constraint 5.6 workload")
     model.max_workload_constraint = pyo.Constraint(model.K, rule=max_workload_rule, doc="Constraint 5.6 max")
 
+    forbid_blocked_arcs(model, data)
     return model

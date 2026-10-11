@@ -5,9 +5,9 @@ Description: Builds the instance a model runs on, from the synthetic generator o
              optionally one neighborhood of it, then samples that slice: the national file
              is too large for the solver, and a broker does not travel from one city to
              another. The graph of the houses is built from listing.address.point.lat and
-             listing.address.point.lon. When that agency and those houses are in the street
-             cache, the distance is the road distance and the free-flow duration is kept
-             for the travel times; otherwise the distance stays straight-line. Each visit
+             listing.address.point.lon. When every house is in the São Paulo street index,
+             the distance is the road distance and the free-flow duration is kept for the
+             travel times; otherwise the distance stays straight-line. Each visit
              lasts longer the larger the listing's usable area. Each broker's home is drawn
              at random inside the city, the convex hull of its listings, and its trips stay
              straight-line. Every other feature (lunch spots, time windows, assignments)
@@ -197,9 +197,10 @@ def _house_graph(latitudes: list[float], longitudes: list[float]) -> dict[str, A
 
     The agency (node 0) sits at the center of the map, on the centroid of the houses. Each
     house is its equirectangular offset from that centroid, MAP_UNITS_PER_KM units per
-    kilometer, east along x and north along y. When the agency and the houses are in the
-    street cache, the distance is the road distance in those same map units and the graph
-    also carries the free-flow duration, in minutes. Otherwise the distance is straight-line.
+    kilometer, east along x and north along y. When every house is a São Paulo listing
+    in the street index, the distance is the road distance in those same map units and
+    the graph also carries the free-flow duration, in minutes. Otherwise the distance
+    is straight-line.
 
     Args:
         latitudes (list[float]): Latitude of each house, in node order from 1 on.
@@ -213,16 +214,33 @@ def _house_graph(latitudes: list[float], longitudes: list[float]) -> dict[str, A
     coordinates = [list(MAP_CENTER)] + [to_map(lat, lon) for lat, lon in zip(latitudes, longitudes)]
     cached = lookup_road_matrix(rounded_points(latitudes, longitudes))
     if cached is None:
-        project_logger.info("No cached street matrix for these coordinates; using straight-line distance.")
+        project_logger.info("No street index for these coordinates; using straight-line distance.")
         distance_matrix = [[0.0 if i == j else round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
                             for j, b in enumerate(coordinates)] for i, a in enumerate(coordinates)]
         return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix}
 
-    project_logger.info(f"Using the cached street matrix for {cached['city']}.")
-    distance_matrix = [[_map_distance(meters) for meters in row] for row in cached["distance_m"]]
-    duration_matrix = [[minutes_from_seconds(seconds) for seconds in row] for row in cached["duration_s"]]
-    return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix,
-            'duration_matrix': duration_matrix, 'city': cached['city']}
+    project_logger.info(f"Using the {cached['city']} street index.")
+    blocked_arcs = []
+    distance_matrix = []
+    duration_matrix = []
+    for i, (meters_row, seconds_row) in enumerate(zip(cached["distance_m"], cached["duration_s"])):
+        distances = []
+        durations = []
+        for j, (meters, seconds) in enumerate(zip(meters_row, seconds_row)):
+            if meters is None or seconds is None:
+                blocked_arcs.append((i, j))
+                distances.append(0.0)
+                durations.append(0.0)
+            else:
+                distances.append(_map_distance(meters))
+                durations.append(minutes_from_seconds(seconds))
+        distance_matrix.append(distances)
+        duration_matrix.append(durations)
+    graph = {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix,
+             'duration_matrix': duration_matrix, 'city': cached['city']}
+    if blocked_arcs:
+        graph['blocked_arcs'] = blocked_arcs
+    return graph
 
 
 def _map_distance(meters: float) -> float:

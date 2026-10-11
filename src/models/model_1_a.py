@@ -11,6 +11,7 @@ Description: Mathematical formulation of M1.a for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
 from src.models.model_1 import (DELAY_TOLERANCE, DELAY_WEIGHT, DISTANCE_WEIGHT, LUNCH_DURATION, LUNCH_WINDOW,
                                 MAX_DAY_LENGTH, OVERTIME_WEIGHT)
 
@@ -322,4 +323,5 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.lunch_visit_constraint = pyo.Constraint(model.K, rule=lunch_visit_rule, doc="Constraint 5.6")
     model.lunch_window_constraint = pyo.Constraint(model.K, rule=lunch_window_rule, doc="Constraint 5.6 window")
 
+    forbid_blocked_arcs(model, data)
     return model

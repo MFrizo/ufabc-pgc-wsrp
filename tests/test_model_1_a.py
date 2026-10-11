@@ -52,8 +52,8 @@ class Model1aTest(unittest.TestCase):
         data = load_instance("synthetic", "m1.a", num_properties=6, random_seed=8)
         self.assertEqual(len(data["fixed_visits"]), 3)
 
-    def test_m1_a_solves_a_real_neighborhood(self):
-        data = load_instance("real", "m1.a", num_properties=6, random_seed=8, city="São Paulo", neighborhood="Moema")
+    def test_m1_a_solves_sao_paulo(self):
+        data = load_instance("real", "m1.a", num_properties=6, random_seed=8, city="São Paulo")
         _, metrics = _solve(build_model_m1_a(data))
         self.assertEqual(metrics["termination_condition"], "optimal")
 

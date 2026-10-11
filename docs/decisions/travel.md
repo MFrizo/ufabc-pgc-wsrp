@@ -2,15 +2,15 @@
 
 This note records how $c_{ij}$ and $t_{ij}$ are built. The matrices are fixed before the MILP is written, so a seed still rebuilds the same model with no network call. The objective still minimizes distance. Switching that term to travel time is a separate open decision, in [Work in progress](wip.md).
 
-The code is `src/core/travel.py` and the generator in `src/core/data_generator.py`. The numbers that the solver reads are `data/travel/detour_factor.json` and `data/travel/road_matrices.json`. The shared conventions are on the [model pages](../models/README.md).
+The code is `src/core/travel.py` and the generator in `src/core/data_generator.py`. The numbers that the solver reads are `data/travel/detour_factor.json` and `data/travel/sao_paulo.json` (the matrix is `data/travel/sao_paulo.npz`). The shared conventions are on the [model pages](../models/README.md).
 
 ## Decision
 
-A cached real instance uses a street-network distance and a free-flow duration, both shortest paths on the OpenStreetMap drive network. The duration is then scaled by a congestion factor for the period the trip leaves in. A synthetic instance keeps the straight-line distance and multiplies it by one detour factor, measured on real listings. Models that have no speed profile keep one constant travel time.
+A São Paulo instance uses a street-network distance and a free-flow duration, both shortest paths on the OpenStreetMap drive network. The duration is then scaled by a congestion factor for the period the trip leaves in. A synthetic instance keeps the straight-line distance and multiplies it by one detour factor, measured on real listings. Models that have no speed profile keep one constant travel time.
 
 ## Why the matrices are fixed
 
-The MILP has to be the same model every time a seed is run. A live routes API, a GPS trace, or a draw of the travel time would change $c_{ij}$ or $t_{ij}$ between runs, and the solver would be solving a different instance. OpenStreetMap itself changes, so the committed JSON is the snapshot. Rebuilding the cache can change the numbers. The instance seed does not.
+The MILP has to be the same model every time a seed is run. A live routes API, a GPS trace, or a draw of the travel time would change $c_{ij}$ or $t_{ij}$ between runs, and the solver would be solving a different instance. OpenStreetMap itself changes, so the committed index is the snapshot. Rebuilding the cache can change the numbers. The instance seed does not.
 
 ## Real instances
 
@@ -20,12 +20,11 @@ The graph is directed. A one-way street makes $(i, j)$ differ from $(j, i)$, and
 
 Meters become the generator's map units, 4 per kilometer, rounded to two decimals, so a street distance sits on the same $100 \times 100$ map as a synthetic one. Seconds become minutes, rounded to four decimals, and the MILP then sees a whole number of minutes.
 
-The cache is keyed by the sequence of coordinates rounded to six decimals, agency centroid first, then the houses in sample order. Two samples are stored:
+The index holds every unique São Paulo listing coordinate, rounded to six decimals. There are 6,874 listings and 3,354 distinct coordinates. A sample uses the index when each of its houses is one of those coordinates, whether or not a neighborhood was set. House-to-house values are the stored shortest paths. The agency is the centroid of the sampled houses, so it is not a listing: its trips are shortest paths on the same drive graph, from the centroid's nearest node, computed when the instance is built. The graph is the bounding box of every São Paulo listing, padded by 0.03°.
 
-- Moema, São Paulo, 5 properties, seed 17. This is the sample the neighborhood tests build.
-- All of São Paulo, no neighborhood, 5 properties, seed 8. This is the sample `python main.py --model m1 --dataset real --city "São Paulo"` builds. The graph is the bounding box of every São Paulo listing in the catalog, padded by 0.03°.
+13,406 directed pairs have no drive path. They are not arcs: the model fixes that crossing at zero, and it is not given a substitute distance. A listing in any other city is not in the index. That instance keeps the straight-line distance, and its travel time stays $\lceil c_{ij} / v \rceil$.
 
-Any other real sample has no row in the cache. It keeps the straight-line distance, and its travel time stays $\lceil c_{ij} / v \rceil$.
+Those 13,406 pairs are the trips out of four listings. The drive graph is directed, so one-way streets split it into strongly connected pieces even though the city is one continuous street network. The largest piece holds 191,489 of 191,955 intersections. Three of the listings snap to a 15-intersection pocket in the west of the city (about −23.62, −46.72) whose one-way streets do not lead back out. The fourth snaps to a single intersection with no outgoing drive edge (about −23.56, −46.60). The rest of the city can still drive in. Nothing drives out, including through another listing, because no mapped drive edge leaves the pocket. An open route can end at that house. A route that has to leave it has no feasible arc.
 
 Broker homes and lunch spots are random points inside the city hull, not catalog listings, so they are not in the matrix. On a real instance their distance stays the straight line.
 
@@ -73,7 +72,7 @@ The street distances do not change what the objective minimizes. M0.0 through M0
 
 ## What the thesis can claim
 
-A cached real instance is routed on the OpenStreetMap drive network of its listings, with free-flow times scaled by weekday congestion for São Paulo. A synthetic instance uses a detour factor measured on the same network, checked against the published circuity ratios, and the factor is fixed for a seed. The models do not query a map, and they do not draw the travel time.
+A São Paulo instance is routed on the OpenStreetMap drive network of the city's listings, with free-flow times scaled by weekday congestion for São Paulo. Any sample of those listings is covered. A synthetic instance uses a detour factor measured on the same network, checked against the published circuity ratios, and the factor is fixed for a seed. The models do not query a map, and they do not draw the travel time.
 
 ## Options that were set aside
 

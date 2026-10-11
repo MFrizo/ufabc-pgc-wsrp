@@ -1,0 +1,11 @@
+{
+  "city": "S\u00e3o Paulo",
+  "neighborhood": null,
+  "listings": 6874,
+  "unique_points": 3354,
+  "unreachable_pairs": 13406,
+  "source": "OSMnx shortest paths on the OpenStreetMap drive network of every S\u00e3o Paulo listing. distance_m is meters. duration_s is free-flow seconds from edge speeds (the posted maxspeed, or OSMnx's speed for the highway type), not live traffic. Any sample of these coordinates uses this index.",
+  "matrix": "sao_paulo.npz",
+  "osmnx": "2.1.1",
+  "downloaded": "2026-10-10"
+}
