@@ -1,9 +1,9 @@
 """
-Checks the workload term of M2: the longest time a working broker is out.
+Checks the fuel cost of M2, and the longest day as a tie-break.
 
-Two properties sit next to broker 1 and a long way from broker 2. Travel times equal
-the distances, so travel time alone gives both visits to broker 1. Each visit takes long enough that splitting them
-shortens the busiest day, and the fairness weight does that split. Broker 3 is off.
+Two properties sit next to broker 1 and a long way from broker 2. Fuel follows the
+distance, so the cheaper plan gives both visits to broker 1 even though his day is
+longer. A fairness weight large enough to price that day does the split. Broker 3 is off.
 """
 
 import unittest
@@ -64,8 +64,17 @@ class Model2FairnessTest(unittest.TestCase):
         self.assertEqual(served[3], [])
         self.assertEqual(pyo.value(model.workload[3]), 0)
 
-    def test_the_fairness_weight_splits_the_visits(self):
+    def test_the_default_keeps_the_cheaper_fuel(self):
         model, metrics = _solve(_instance())
+        self.assertEqual(metrics["termination_condition"], "optimal")
+
+        served = _visits_of(model)
+        self.assertEqual(served[1], [1, 2])
+        self.assertEqual(served[2], [])
+        self.assertEqual(served[3], [])
+
+    def test_a_priced_longest_day_splits_the_visits(self):
+        model, metrics = _solve({**_instance(), 'fairness_weight': 10})
         self.assertEqual(metrics["termination_condition"], "optimal")
 
         served = _visits_of(model)

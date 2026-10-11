@@ -1,6 +1,6 @@
 # Work in progress
 
-Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. The street distances and travel times are implemented, in [Distances and travel times](travel.md). M1, M1.a and M2 minimize travel time, with distance only as a tie-break. The Pareto front is implemented as M3. Live traffic and a real cost per kilometre are not.
+Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. The street distances and travel times are implemented, in [Distances and travel times](travel.md). M1 and M1.a minimize travel time, with distance only as a tie-break. M2 minimizes fuel. The Pareto front is implemented as M3. Live traffic is not.
 
 Names follow the renumbering. m1 was M7, m1.a was M9, m2 was M8, m0.5 was M5, and m0.6 was M6.
 
@@ -17,9 +17,9 @@ Live traffic, GPS traces and random travel times stay out of scope (Taş, Dellae
 
 ## Travel time in the objective
 
-This is implemented on m1, m1.a and m2. Each minute of driving has weight $W_{time} = 1$. The distance weight is $1/(U+1)$, where $U$ is an upper bound on the distance of any plan, so the kilometres of a whole plan are worth less than one minute. They only separate plans whose travel time, delay and overtime (and, on m2, workload) are equal. The formulations are on the model pages.
+This is implemented on m1 and m1.a. Each minute of driving has weight $W_{time} = 1$. The distance weight is $1/(U+1)$, where $U$ is an upper bound on the distance of any plan, so the kilometres of a whole plan are worth less than one minute. They only separate plans whose travel time, delay and overtime are equal. The formulations are on the model pages.
 
-A real cost per kilometre, $\alpha c_{ij} + \beta t_{ij}$ as in the pollution-routing problem (Bektaş and Laporte, 2011), was not added. It needs a real R$/km figure and a real R$/min figure. m1, m1.a and m2 still read one travel-time period. Rush hours stay in m0.5 and m0.6.
+M2 charges fuel instead. A broker is paid when a deal closes, which does not give a reais-per-minute figure, so there is no $\beta$ on his time. The fuel coefficient is the ANP ethanol price in the city of São Paulo for the week of 4–10 October 2026 divided by the INMETRO urban consumption of a Volkswagen Polo 1.0 MPI, then by the 4 map units in a kilometre. Delay and the longest day only break a tie. A full $\alpha c_{ij} + \beta t_{ij}$ cost, as in the pollution-routing problem (Bektaş and Laporte, 2011), was not added. m1, m1.a and m2 still read one travel-time period. Rush hours stay in m0.5 and m0.6.
 
 ## One solution for the agency and the brokers
 
@@ -31,7 +31,7 @@ This is implemented as [M3](../models/m3.md). A Pareto front is the right pictur
 A route that is feasible in one model can be infeasible in the other. The front needs one model whose feasible set is shared. The rules nobody negotiates stay as constraints: each visit served once, an already-assigned visit done by its broker, the time windows and their tolerance, the 12-hour day, and a lunch break. Each side's preferences become an objective.
 
 - **Agency, $f_1$:** brokers used, travel time, and delay for the clients. This is the m1 objective.
-- **Brokers, $f_2$:** minutes outside the broker's own shifts, work on a day off, and distance from the lunch spot the broker picked. These are the m2 rules, made soft. m2 already charges the longest time a working broker is out, the min-max measure of Matl, Hartl and Vidal (2018). That term stays inside m2. It is not a substitute for this front, because m1 and m2 still do not share a feasible set.
+- **Brokers, $f_2$:** minutes outside the broker's own shifts, work on a day off, and distance from the lunch spot the broker picked. These are the m2 rules, made soft. m2 already records the longest time a working broker is out, the min-max measure of Matl, Hartl and Vidal (2018), and uses it only to break a fuel tie. That term stays inside m2. It is not a substitute for this front, because m1 and m2 still do not share a feasible set.
 
 Compute the front with the $\varepsilon$-constraint method. A weighted sum $\lambda f_1 + (1-\lambda) f_2$ only finds points on the convex hull of an integer front (Mavrotas, 2009). AUGMECON is the usual version of $\varepsilon$-constraint. The balanced box method is an exact alternative for two objectives (Boland, Charkhgard and Savelsbergh, 2015). Surveys of multi-objective routing and the closest applied front are Jozefowiez, Semet and Talbi (2008) and Braekers, Hartl, Parragh and Tricoire (2016). The home-care paper is the model for the chapter: a front between operating cost and the inconvenience of the people being served.
 
