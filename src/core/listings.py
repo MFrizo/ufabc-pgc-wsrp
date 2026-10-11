@@ -4,12 +4,14 @@ Description: Builds the instance a model runs on, from the synthetic generator o
              real rental catalog of src.utils.real_catalog. A real call keeps one city, and
              optionally one neighborhood of it, then samples that slice: the national file
              is too large for the solver, and a broker does not travel from one city to
-             another. The graph
-             of the houses is built from listing.address.point.lat and
-             listing.address.point.lon, and each visit lasts longer the larger the listing's
-             usable area. Each broker's home is drawn at random inside the city, the convex
-             hull of its listings. Every other feature (lunch spots, time windows,
-             assignments) still comes from the generator.
+             another. The graph of the houses is built from listing.address.point.lat and
+             listing.address.point.lon. When that agency and those houses are in the street
+             cache, the distance is the road distance and the free-flow duration is kept
+             for the travel times; otherwise the distance stays straight-line. Each visit
+             lasts longer the larger the listing's usable area. Each broker's home is drawn
+             at random inside the city, the convex hull of its listings, and its trips stay
+             straight-line. Every other feature (lunch spots, time windows, assignments)
+             still comes from the generator.
 """
 
 import math
@@ -19,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from src.core.data_generator import AUTO_BROKERS, generate_wsrp_instance
+from src.core.travel import lookup_road_matrix, minutes_from_seconds, rounded_points
 from src.models import INSTANCE_SETTINGS, SINGLE_BROKER_MODELS, STRICT_TIME_MODELS
 from src.utils.logger import project_logger
 from src.utils.real_catalog import (KM_PER_DEGREE_LAT, KM_PER_DEGREE_LON, REAL_CATALOG, REAL_CATALOG_SOURCE,
@@ -127,8 +130,7 @@ def instance_from_catalog(city: str, neighborhood: Optional[str] = None, num_pro
         raise ValueError(f"{place} has {len(catalog)} listings, fewer than {num_properties}.")
 
     project_logger.info(f"Sampling {num_properties} of {len(catalog)} listings in {place}.")
-    rng = np.random.default_rng(random_seed)
-    chosen = catalog.iloc[rng.choice(len(catalog), size=num_properties, replace=False)].reset_index(drop=True)
+    chosen = sample_listings(catalog, num_properties, random_seed)
 
     to_map = _map_projection(chosen["lat"].tolist(), chosen["lon"].tolist())
     in_city = full_catalog.loc[full_catalog["city"].eq(city)]
@@ -142,6 +144,23 @@ def instance_from_catalog(city: str, neighborhood: Optional[str] = None, num_pro
     data_payload['listings'] = [_listing_record(node, row)
                                 for node, row in enumerate(chosen.itertuples(index=False), start=1)]
     return data_payload
+
+
+def sample_listings(catalog: pd.DataFrame, num_properties: int, random_seed: int) -> pd.DataFrame:
+    """
+    Draws num_properties rows with default_rng(random_seed). The same seed and the same
+    catalog always return the same rows, in the order they were drawn.
+
+    Args:
+        catalog (pd.DataFrame): Listings to draw from, already limited to one place.
+        num_properties (int): How many rows to draw.
+        random_seed (int): Seed of this draw only.
+
+    Returns:
+        pd.DataFrame: The drawn listings, in draw order, with a fresh index.
+    """
+    rng = np.random.default_rng(random_seed)
+    return catalog.iloc[rng.choice(len(catalog), size=num_properties, replace=False)].reset_index(drop=True)
 
 
 def select_listings(catalog: pd.DataFrame, city: str, neighborhood: Optional[str] = None) -> pd.DataFrame:
@@ -178,21 +197,39 @@ def _house_graph(latitudes: list[float], longitudes: list[float]) -> dict[str, A
 
     The agency (node 0) sits at the center of the map, on the centroid of the houses. Each
     house is its equirectangular offset from that centroid, MAP_UNITS_PER_KM units per
-    kilometer, east along x and north along y.
+    kilometer, east along x and north along y. When the agency and the houses are in the
+    street cache, the distance is the road distance in those same map units and the graph
+    also carries the free-flow duration, in minutes. Otherwise the distance is straight-line.
 
     Args:
         latitudes (list[float]): Latitude of each house, in node order from 1 on.
         longitudes (list[float]): Longitude of each house, in the same order.
 
     Returns:
-        dict[str, Any]: 'num_nodes', 'coordinates' and the Euclidean 'distance_matrix',
-            rounded to 2 decimals like the generator's.
+        dict[str, Any]: 'num_nodes', 'coordinates' and 'distance_matrix', rounded to 2
+            decimals like the generator's. A cache hit also has 'duration_matrix' and 'city'.
     """
     to_map = _map_projection(latitudes, longitudes)
     coordinates = [list(MAP_CENTER)] + [to_map(lat, lon) for lat, lon in zip(latitudes, longitudes)]
-    distance_matrix = [[0.0 if i == j else round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
-                        for j, b in enumerate(coordinates)] for i, a in enumerate(coordinates)]
-    return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix}
+    cached = lookup_road_matrix(rounded_points(latitudes, longitudes))
+    if cached is None:
+        project_logger.info("No cached street matrix for these coordinates; using straight-line distance.")
+        distance_matrix = [[0.0 if i == j else round(math.hypot(a[0] - b[0], a[1] - b[1]), 2)
+                            for j, b in enumerate(coordinates)] for i, a in enumerate(coordinates)]
+        return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix}
+
+    project_logger.info(f"Using the cached street matrix for {cached['city']}.")
+    distance_matrix = [[_map_distance(meters) for meters in row] for row in cached["distance_m"]]
+    duration_matrix = [[minutes_from_seconds(seconds) for seconds in row] for row in cached["duration_s"]]
+    return {'num_nodes': len(coordinates), 'coordinates': coordinates, 'distance_matrix': distance_matrix,
+            'duration_matrix': duration_matrix, 'city': cached['city']}
+
+
+def _map_distance(meters: float) -> float:
+    """Road meters as map units, 0 on a zero trip, otherwise rounded to 2 decimals."""
+    if meters == 0:
+        return 0.0
+    return round(meters / 1000.0 * MAP_UNITS_PER_KM, 2)
 
 
 def _map_projection(latitudes: list[float], longitudes: list[float]) -> Callable[[float, float], list[float]]:

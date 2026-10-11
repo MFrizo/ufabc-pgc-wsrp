@@ -3,16 +3,15 @@ Builds instances from one city, or one neighborhood of it, of the real catalog, 
 ones are unchanged.
 """
 
-import math
 import unittest
 
 from src.core.data_generator import AUTO_BROKERS, generate_wsrp_instance
-from src.core.listings import MAP_CENTER, MAP_UNITS_PER_KM, load_instance, select_listings
+from src.core.listings import MAP_CENTER, _map_projection, load_instance, select_listings
 from src.models import INSTANCE_SETTINGS, SINGLE_BROKER_MODELS
 from src.models.model_1 import build_model_m1
 from src.solvers.engine import solve_model
 from src.utils.logger import project_logger
-from src.utils.real_catalog import KM_PER_DEGREE_LAT, KM_PER_DEGREE_LON, REAL_CATALOG, clean_real_catalog
+from src.utils.real_catalog import REAL_CATALOG, clean_real_catalog
 
 
 class RealInstancesTest(unittest.TestCase):
@@ -31,16 +30,12 @@ class RealInstancesTest(unittest.TestCase):
     def test_house_graph_follows_listing_coordinates(self):
         data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo", neighborhood="Moema")
         listings = data["listings"]
-        origin_lat = sum(listing["lat"] for listing in listings) / len(listings)
-        origin_lon = sum(listing["lon"] for listing in listings) / len(listings)
-        km_per_degree_lon = KM_PER_DEGREE_LON * math.cos(math.radians(origin_lat))
+        to_map = _map_projection([listing["lat"] for listing in listings], [listing["lon"] for listing in listings])
 
         self.assertEqual(data["coordinates"][0], list(MAP_CENTER))
-        for a in listings:
-            for b in listings:
-                km = math.hypot((a["lat"] - b["lat"]) * KM_PER_DEGREE_LAT,
-                                (a["lon"] - b["lon"]) * km_per_degree_lon)
-                self.assertAlmostEqual(data["distance_matrix"][a["node"]][b["node"]], km * MAP_UNITS_PER_KM, places=1)
+        for listing in listings:
+            self.assertEqual(data["coordinates"][listing["node"]], to_map(listing["lat"], listing["lon"]))
+        self.assertIn("duration_matrix", data)
 
     def test_m1_solves_a_real_neighborhood(self):
         data = load_instance("real", "m1", num_properties=5, random_seed=17, city="São Paulo", neighborhood="Moema")

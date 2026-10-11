@@ -11,6 +11,8 @@ import math
 import numpy as np
 from typing import Any, Optional, Union
 
+from src.core.travel import congestion_factors, detour_factor, travel_minutes
+
 # Random stream of each feature. The graph uses the plain seed; every other feature
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
 TIME_WINDOWS_STREAM = 1
@@ -92,7 +94,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             minutes, for the models that limit it. Not used with split_shifts.
         graph (Optional[dict[str, Any]]): Nodes to visit instead of the random 100x100 map, with
             'num_nodes' (num_properties + 1), 'coordinates' and 'distance_matrix', e.g. real
-            listings. Every other feature is still generated.
+            listings. A cached street network also brings 'duration_matrix' (free-flow minutes)
+            and 'city'. Every other feature is still generated.
         max_routing_arcs (int): Most brokers x arcs between the nodes an AUTO_BROKERS fleet may
             give the solver. Not used with a fixed num_brokers.
         areas (Optional[list[float]]): Usable area of each property, in m², in node order from
@@ -111,7 +114,10 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             - 'num_brokers': M0.2 onwards.
             - 'assigned_broker': M0.3 onwards.
             - 'service_times': M0.4 onwards.
-            - 'period_starts', 'travel_times': M0.5 onwards.
+            - 'period_starts', 'travel_times': M0.5 onwards. With a 'duration_matrix', the
+              travel times scale those free-flow minutes by the city's congestion factors
+              instead of dividing the distance by the speed.
+            - 'duration_matrix', 'city': a real instance whose street matrix is cached.
             - 'home_coordinates', 'home_distances', 'home_travel_times': M1 onwards.
             - 'shift_start', 'shift_end': M1 and M1.a.
             - 'lunch_spot_coordinates', 'lunch_spot_distances', 'lunch_spot_travel_times', 'shifts': M2.
@@ -152,10 +158,14 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         raise ValueError(f"There are {len(areas)} areas for {num_properties} properties.")
     else:
         data_payload['service_times'] = _area_service_times(areas, service_time, service_time_variation)
-    data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile))
+    data_payload.update(_generate_travel_times(data_payload['distance_matrix'], travel_time, speed_profile,
+                                               data_payload.get('duration_matrix'), data_payload.get('city')))
+    # Drawn points are not listings, so a real instance keeps their straight-line distance.
+    # A synthetic map scales them by the same detour factor as the nodes.
+    detour = 1.0 if graph is not None else detour_factor()
     for prefix, stream, region in (('home', HOMES_STREAM, home_region), ('lunch_spot', LUNCH_SPOTS_STREAM, None)):
         places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
-                                         travel_time, speed_profile, region)
+                                         travel_time, speed_profile, region, detour)
         data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
     data_payload['shifts'] = _generate_shifts(random_seed, num_brokers, days_off)
 
@@ -235,10 +245,11 @@ def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs
     data_payload['max_brokers'] = max_brokers
     if num_brokers > schedule_brokers:
         # Places are drawn one broker after another, so the first ones are the schedule's
+        detour = 1.0 if settings['graph'] is not None else detour_factor()
         for prefix, stream, region in (('home', HOMES_STREAM, settings['home_region']),
                                        ('lunch_spot', LUNCH_SPOTS_STREAM, None)):
             places = _generate_broker_places(random_seed, stream, num_brokers, data_payload['coordinates'],
-                                             settings['travel_time'], settings['speed_profile'], region)
+                                             settings['travel_time'], settings['speed_profile'], region, detour)
             data_payload.update({f'{prefix}_{key}': value for key, value in places.items()})
         # The extra brokers all work; the schedule's keep their shifts and days off
         extra_shifts = _generate_shifts(random_seed, num_brokers, 0)[schedule_brokers:]
@@ -283,7 +294,11 @@ def _day_length(settings: dict[str, Any]) -> int:
 
 def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:
     """
-    Distributes the nodes in a 100x100 grid map and computes the Euclidean distance matrix.
+    Distributes the nodes in a 100x100 grid map and computes the distance matrix.
+
+    The distance is the straight-line distance times the detour factor measured on
+    real listings. The factor is data, not a draw, so it does not move this seed's
+    coordinates.
 
     Args:
         num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
@@ -301,17 +316,16 @@ def _generate_graph(num_nodes: int, random_seed: int) -> dict[str, Any]:
     coordinates = rng.random((num_nodes, 2)) * 100.0
 
     # 3. Distance Matrix Computation
-    # Creating an N x N matrix initialized with zeros
+    # Straight-line distance times the detour factor, rounded to 2 decimals.
+    factor = detour_factor()
     distance_matrix = np.zeros((num_nodes, num_nodes))
 
     for i in range(num_nodes):
         for j in range(num_nodes):
             if i != j:
-                # Calculating Euclidean distance between node i and node j
                 dist = math.hypot(coordinates[i][0] - coordinates[j][0],
                                   coordinates[i][1] - coordinates[j][1])
-                # Rounding to 2 decimal places to avoid floating-point representation issues
-                distance_matrix[i][j] = round(dist, 2)
+                distance_matrix[i][j] = round(dist * factor, 2)
 
     return {
         'num_nodes': num_nodes,
@@ -366,19 +380,33 @@ def _area_service_times(areas: list[float], service_time: int, service_time_vari
 
 
 def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
-                           speed_profile: Optional[list[tuple[int, float]]]) -> dict[str, Any]:
+                           speed_profile: Optional[list[tuple[int, float]]],
+                           duration_matrix: Optional[list[list[float]]] = None,
+                           city: Optional[str] = None) -> dict[str, Any]:
     """
     Computes the travel time of every trip in every period of the day.
+
+    Without a speed profile every trip takes T. With one, and no free-flow durations,
+    the trip takes ceil(distance / speed) at the speed of the period it leaves in.
+    With free-flow durations, those minutes are scaled by the city's congestion factor
+    for that same period and rounded up. M0.1 to M0.4 pass no speed profile, so they
+    keep T even when the graph carries durations.
 
     Args:
         distance_matrix (list[list[float]]): Distance c_ij between every pair of nodes.
         travel_time (int): Constant travel time T, used when there is no speed profile.
         speed_profile (Optional[list[tuple[int, float]]]): Periods of the day as (start minute,
             speed in distance units per minute), the first starting at 0.
+        duration_matrix (Optional[list[list[float]]]): Free-flow minutes of a cached street
+            network, one row per node. None uses the distance and the speed.
+        city (Optional[str]): City of the duration matrix, selecting its congestion profile.
 
     Returns:
         dict[str, Any]: The start minute of each period and, for each period, the matrix of
             travel times t_ij in whole minutes (rounded up) of a trip leaving in it.
+
+    Raises:
+        ValueError: If a duration matrix has no city, or the city has no congestion profile.
     """
     num_nodes = len(distance_matrix)
 
@@ -386,6 +414,16 @@ def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
         return {
             'period_starts': [0],
             'travel_times': [[[0 if i == j else travel_time for j in range(num_nodes)] for i in range(num_nodes)]]
+        }
+
+    if duration_matrix is not None:
+        if not city:
+            raise ValueError("A free-flow duration matrix needs a city for its congestion profile.")
+        factors = congestion_factors(city, speed_profile)
+        return {
+            'period_starts': [start for start, _ in speed_profile],
+            'travel_times': [[[travel_minutes(duration, factor) for duration in row] for row in duration_matrix]
+                             for factor in factors]
         }
 
     return {
@@ -397,12 +435,13 @@ def _generate_travel_times(distance_matrix: list[list[float]], travel_time: int,
 
 def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coordinates: list[list[float]],
                             travel_time: int, speed_profile: Optional[list[tuple[int, float]]],
-                            region: Optional[list[list[float]]] = None) -> dict[str, Any]:
+                            region: Optional[list[list[float]]] = None, detour: float = 1.0) -> dict[str, Any]:
     """
     Places one point per broker (e.g. his home) in the same 100x100 grid map as the nodes,
     or uniformly inside region, and computes the distance and travel times from it to every
     node. Points are drawn one broker after another, so the first ones of a larger fleet
-    are the points of a smaller one.
+    are the points of a smaller one. The distance is the straight-line distance times
+    detour (the synthetic detour factor, or 1 for a real instance).
 
     Args:
         random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
@@ -414,6 +453,7 @@ def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coo
             speed in distance units per minute), the first starting at 0.
         region (Optional[list[list[float]]]): (x, y) of the vertices of a convex polygon the
             points are drawn in, instead of the 100x100 map.
+        detour (float): Multiplier of the straight-line distance. 1 leaves it unchanged.
 
     Returns:
         dict[str, Any]: The coordinates of each broker's place, the distance from it to each
@@ -425,7 +465,7 @@ def _generate_broker_places(random_seed: int, stream: int, num_brokers: int, coo
     else:
         place_coordinates = _points_in_polygon(rng.random((num_brokers, 3)), region)
 
-    distances = [[round(math.hypot(place[0] - node[0], place[1] - node[1]), 2) for node in coordinates]
+    distances = [[round(math.hypot(place[0] - node[0], place[1] - node[1]) * detour, 2) for node in coordinates]
                  for place in place_coordinates]
 
     if speed_profile is None:

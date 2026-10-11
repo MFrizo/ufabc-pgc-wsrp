@@ -35,7 +35,9 @@ SINGLE_BROKER_MODELS = ('m0.0', 'm0.1')
 # Models that book every visit at its earliest start h_i, so every visit has a strict time
 STRICT_TIME_MODELS = ('m1', 'm2')
 
-# Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day
+# Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day.
+# Synthetic trips and drawn points use these speeds. A cached real street duration is
+# scaled by the congestion factors in src.core.travel instead.
 RUSH_HOURS = [(0, 1.0), (120, 2.0), (540, 1.0)]
 
 # The speed outside rush hours all day long, for the models with a single travel time t_ij
