@@ -15,6 +15,7 @@ Usage:
     python main.py --model m1      # First complete model: MO-DOMDVRPTW-SD
     python main.py --model m1.a --fixed-ratio 0.25    # Subcase of m1: a quarter of the visits booked
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
+    python main.py --model m3      # Pareto front of the agency and the brokers
 
     python main.py --model m1 --properties 12 --brokers 4    # Custom instance size
     python main.py --model m1 --properties 12 --brokers auto    # Fleet drawn from the instance
@@ -43,7 +44,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     Main execution pipeline for local development and benchmarking.
 
     Args:
-        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0.0', 'm1', 'm1.a', 'm2').
+        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0.0', 'm1', 'm1.a', 'm2', 'm3').
         num_properties (int): Number of properties to visit.
         num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M0.2 onwards;
             m0.0 and m0.1 warn and ignore it. "auto" draws it between the fewest brokers the visits
@@ -56,7 +57,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
             src.models.DEFAULT_SEEDS or DEFAULT_SEED.
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
-            the others may start at any time of the day. m1 and m2 warn and ignore it. None keeps
+            the others may start at any time of the day. m1, m2 and m3 warn and ignore it. None keeps
             the model's own setting.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
@@ -89,6 +90,21 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     # ---------------------------------------------------------
     # PHASE 2: Mathematical Modeling (Pyomo Polyhedron)
     # ---------------------------------------------------------
+    if model_version == 'm3':
+        from src.models.model_3 import pareto_front
+
+        project_logger.info("PHASE 2: Pareto front, one MILP per fleet size...")
+        front = pareto_front(data_payload)
+        if not front:
+            project_logger.error("No feasible fleet size.")
+            return
+        for point in front:
+            project_logger.info(
+                f"  {point['brokers']} broker(s): broker cost {point['broker_cost']:.1f} min, "
+                f"travel {point['travel_time']:.0f} min, delay {point['delay']:.1f} min, "
+                f"overtime {point['overtime']:.1f} min")
+        return
+
     project_logger.info("PHASE 2: Building abstract MILP model...")
     abstract_model = BUILDERS[model_version](data_payload)
 
@@ -152,7 +168,7 @@ if __name__ == "__main__":
     parser.add_argument('--fixed-ratio', type=_ratio, default=None,
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
-                             "distribution over each broker's free time. m1 and m2 book every visit, so they warn "
+                             "distribution over each broker's free time. m1, m2 and m3 book every visit, so they warn "
                              "and ignore it; m1.a is m1 with this share of the visits booked (default: the model's "
                              "own setting)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',

@@ -1,6 +1,6 @@
 # Work in progress
 
-Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. The street distances and travel times are implemented, in [Distances and travel times](travel.md). M1, M1.a and M2 minimize travel time, with distance only as a tie-break. The rest of this note is not.
+Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. The street distances and travel times are implemented, in [Distances and travel times](travel.md). M1, M1.a and M2 minimize travel time, with distance only as a tie-break. The Pareto front is implemented as M3. Live traffic and a real cost per kilometre are not.
 
 Names follow the renumbering. m1 was M7, m1.a was M9, m2 was M8, m0.5 was M5, and m0.6 was M6.
 
@@ -23,7 +23,7 @@ A real cost per kilometre, $\alpha c_{ij} + \beta t_{ij}$ as in the pollution-ro
 
 ## One solution for the agency and the brokers
 
-A Pareto front is the right picture of a solution that serves both sides. It cannot be built from m1 and m2 as they stand, because the constraints differ, not only the objectives.
+This is implemented as [M3](../models/m3.md). A Pareto front is the right picture of a solution that serves both sides. It cannot be built from m1 and m2 as they stand, because the constraints differ, not only the objectives.
 
 - **m1:** one open route from home, a virtual lunch node, a 12-hour cap, overtime charged as a penalty.
 - **m2:** two shifts, lunch at a chosen spot, hard shift ends, days off.
