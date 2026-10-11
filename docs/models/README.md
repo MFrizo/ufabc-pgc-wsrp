@@ -15,9 +15,9 @@ Each page lists the sets, parameters, decision variables, objective function and
 | [M0.4](m0.4.md) | sub-step | VRPTWWVST | M0.3 | A service time of its own for each visit | Distance |
 | [M0.5](m0.5.md) | sub-step | TDVRPTW | M0.4 | Travel time by the period of the day the trip leaves in | Time out of the agency |
 | [M0.6](m0.6.md) | sub-step | FSMVRPTW | M0.5 | Fleet minimization | Brokers, then time out of the agency |
-| [M1](m1.md) | first complete model | MO-DOMDVRPTW-SD | M0.4–M0.6 | Brokers start at home, open routes, lunch break, soft windows, overtime, 12-hour days | Brokers, then distance, delay and overtime |
-| [M1.a](m1.a.md) | subcase of M1 | MO-DOMDVRPTW-SD with flexible visits | M1 | Only a share of the visits booked; the others may start at any time of the day | Brokers, then distance, delay and overtime |
-| [M2](m2.md) | broker-focused model | HC-DOMDVRPTW-SD | M1 | A morning and an afternoon shift per broker, lunch spot, days off, hard shift ends | Distance, delay and the longest day |
+| [M1](m1.md) | first complete model | MO-DOMDVRPTW-SD | M0.4–M0.6 | Brokers start at home, open routes, lunch break, soft windows, overtime, 12-hour days | Brokers, then travel time, delay and overtime |
+| [M1.a](m1.a.md) | subcase of M1 | MO-DOMDVRPTW-SD with flexible visits | M1 | Only a share of the visits booked; the others may start at any time of the day | Brokers, then travel time, delay and overtime |
+| [M2](m2.md) | broker-focused model | HC-DOMDVRPTW-SD | M1 | A morning and an afternoon shift per broker, lunch spot, days off, hard shift ends | Travel time, delay and the longest day |
 
 ## Conventions shared by every model
 

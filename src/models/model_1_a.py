@@ -12,8 +12,8 @@ Description: Mathematical formulation of M1.a for the WSRP.
 import pyomo.environ as pyo
 
 from src.models.blocked import forbid_blocked_arcs
-from src.models.model_1 import (DELAY_TOLERANCE, DELAY_WEIGHT, DISTANCE_WEIGHT, LUNCH_DURATION, LUNCH_WINDOW,
-                                MAX_DAY_LENGTH, OVERTIME_WEIGHT)
+from src.models.model_1 import (DELAY_TOLERANCE, DELAY_WEIGHT, LUNCH_DURATION, LUNCH_WINDOW,
+                                MAX_DAY_LENGTH, OVERTIME_WEIGHT, TRAVEL_WEIGHT, tie_break_distance_weight)
 
 
 def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
@@ -39,8 +39,10 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
             - 'shift_start' / 'shift_end' (list): Start E_k and regular end L_k of each broker's day.
             - 'max_day_length' (int, optional): Longest day J_max, in minutes. Defaults to 12 hours.
-            - 'fleet_weight', 'distance_weight', 'delay_weight', 'overtime_weight' (float, optional):
-              Weights of the objective. The fleet weight is computed if absent.
+            - 'fleet_weight', 'travel_weight', 'distance_weight', 'delay_weight', 'overtime_weight'
+              (float, optional): Weights of the objective. The fleet weight is computed if
+              absent. The distance weight, if absent, only breaks ties between plans whose
+              travel time, delay and overtime are equal.
 
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
@@ -175,16 +177,22 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
                      + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
     model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
 
-    # W_dist, W_atraso, W_extra: Weights of the routes, the delays and the overtime
-    model.distance_weight = pyo.Param(initialize=data.get('distance_weight', DISTANCE_WEIGHT), doc="W_dist")
+    # W_time, W_dist, W_atraso, W_extra: Weights of the driving time, the distance tie-break,
+    # the delays and the overtime. A plan has at most one paid trip per property and home,
+    # and only the booked visits can be late.
+    paid_arcs = num_properties + num_brokers
+    max_distance = max(pyo.value(model.distance[arc]) for arc in model.ARCS)
+    model.travel_weight = pyo.Param(initialize=data.get('travel_weight', TRAVEL_WEIGHT), doc="W_time")
+    model.distance_weight = pyo.Param(
+        initialize=data.get('distance_weight', tie_break_distance_weight(paid_arcs, max_distance)), doc="W_dist")
     model.delay_weight = pyo.Param(initialize=data.get('delay_weight', DELAY_WEIGHT), doc="W_atraso")
     model.overtime_weight = pyo.Param(initialize=data.get('overtime_weight', OVERTIME_WEIGHT), doc="W_extra")
 
-    # W_frota: Larger than the routes, delays and overtime of any plan put together, so one
-    # broker fewer always comes first. A plan has at most one paid trip per property and home,
-    # and only the booked visits can be late
-    max_routes = ((num_properties + num_brokers) * max(pyo.value(model.distance[arc]) for arc in model.ARCS)
-                  * pyo.value(model.distance_weight)
+    # W_frota: Larger than the driving time, distance, delays and overtime of any plan put
+    # together, so one broker fewer always comes first.
+    max_routes = (paid_arcs * max(pyo.value(model.travel_time[arc]) for arc in model.ARCS)
+                  * pyo.value(model.travel_weight)
+                  + paid_arcs * max_distance * pyo.value(model.distance_weight)
                   + len(model.C_h) * DELAY_TOLERANCE * pyo.value(model.delay_weight)
                   + sum(max(0, horizon - pyo.value(model.shift_end[k])) for k in model.K)
                   * pyo.value(model.overtime_weight))
@@ -214,15 +222,17 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     # 4. OBJECTIVE FUNCTION
     # =========================================================================
     def objective_rule(model_instance):
-        """Minimize W_frota * sum(y_k) + W_dist * sum(c_ij * x_ijk) + W_atraso * sum(atraso_i) + W_extra * sum(he_k)."""
+        """Minimize W_frota * sum(y_k) + W_time * sum(t_ij * x_ijk) + W_dist * sum(c_ij * x_ijk) + W_atraso * sum(atraso_i) + W_extra * sum(he_k)."""
         return (model_instance.fleet_weight * sum(model_instance.y[k] for k in model_instance.K)
+                + model_instance.travel_weight * sum(model_instance.travel_time[arc] * model_instance.x[arc]
+                                                     for arc in model_instance.ARCS)
                 + model_instance.distance_weight * sum(model_instance.distance[arc] * model_instance.x[arc]
                                                        for arc in model_instance.ARCS)
                 + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C_h)
                 + model_instance.overtime_weight * sum(model_instance.overtime[k] for k in model_instance.K))
 
     model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize,
-                              doc="Minimize brokers first, then distance, delays and overtime")
+                              doc="Minimize brokers first, then travel time, delays and overtime")
 
     # =========================================================================
     # 5. CONSTRAINTS

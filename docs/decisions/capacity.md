@@ -34,7 +34,7 @@ The canonical definitions behind several of the names used in this project inclu
 | Multi-depot and site-dependent VRPTW | The standard benchmarks are capacitated | Cordeau and Laporte (2001); Cordeau, Laporte and Mercier (2001); Vidal, Crainic, Gendreau and Prins (2013) |
 | FSMVRPTW (m0.6) | The "mix" is a choice of vehicle types that differ in capacity and cost | Golden, Assad, Levy and Gheysens (1984) |
 
-m0.6 has identical brokers and no capacity, so it is a VRPTW with hierarchical fleet minimization: fewest brokers first, then the secondary criterion. That is Solomon's objective, not a fleet-size-and-mix problem. m1 has the same hierarchical shape, with distance, delay and overtime in place of the secondary criterion.
+m0.6 has identical brokers and no capacity, so it is a VRPTW with hierarchical fleet minimization: fewest brokers first, then the secondary criterion. That is Solomon's objective, not a fleet-size-and-mix problem. m1 has the same hierarchical shape, with travel time, delay and overtime in place of the secondary criterion.
 
 ## Options that were set aside
 
