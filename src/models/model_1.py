@@ -12,6 +12,8 @@ Description: Mathematical formulation of M1 for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
+
 # Rules of M1, in minutes from the start of the day (08:00)
 DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 LUNCH_DURATION = 60             # s_ak: Length of the lunch break
@@ -311,4 +313,5 @@ def build_model_m1(data: dict) -> pyo.ConcreteModel:
     model.lunch_visit_constraint = pyo.Constraint(model.K, rule=lunch_visit_rule, doc="Constraint 5.6")
     model.lunch_window_constraint = pyo.Constraint(model.K, rule=lunch_window_rule, doc="Constraint 5.6 window")
 
+    forbid_blocked_arcs(model, data)
     return model

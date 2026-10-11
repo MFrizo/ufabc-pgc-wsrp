@@ -34,8 +34,7 @@ class CityBrokerHomesTest(unittest.TestCase):
 
     def test_homes_are_inside_the_city(self):
         for seed in range(1, 6):
-            data = load_instance("real", "m1", num_properties=6, random_seed=seed, num_brokers=4,
-                                 city=CITY, neighborhood=NEIGHBORHOOD)
+            data = load_instance("real", "m1", num_properties=6, random_seed=seed, num_brokers=4, city=CITY)
             hull = self._city_hull(data)
             for home in data["home_coordinates"]:
                 self.assertTrue(_inside(home, hull), f"seed {seed}: home {home} is outside {CITY}")
@@ -52,15 +51,14 @@ class CityBrokerHomesTest(unittest.TestCase):
         self.assertGreater(farthest / MAP_UNITS_PER_KM, 10)
 
     def test_home_distances_follow_the_homes(self):
-        data = load_instance("real", "m1", num_properties=6, random_seed=17, city=CITY, neighborhood=NEIGHBORHOOD)
+        data = load_instance("real", "m1", num_properties=6, random_seed=17, city=CITY)
         for home, distances in zip(data["home_coordinates"], data["home_distances"]):
             self.assertEqual(distances, [round(math.dist(home, node), 2) for node in data["coordinates"]])
 
     def test_auto_fleet_homes_are_inside_the_city_and_keep_the_schedule_ones(self):
-        data = load_instance("real", "m1", num_properties=8, random_seed=17, num_brokers=AUTO_BROKERS,
-                             city=CITY, neighborhood=NEIGHBORHOOD)
+        data = load_instance("real", "m1", num_properties=8, random_seed=17, num_brokers=AUTO_BROKERS, city=CITY)
         schedule = load_instance("real", "m1", num_properties=8, random_seed=17,
-                                 num_brokers=data["schedule_brokers"], city=CITY, neighborhood=NEIGHBORHOOD)
+                                 num_brokers=data["schedule_brokers"], city=CITY)
         hull = self._city_hull(data)
 
         self.assertEqual(len(data["home_coordinates"]), data["num_brokers"])

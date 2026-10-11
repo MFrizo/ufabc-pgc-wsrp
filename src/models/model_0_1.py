@@ -9,6 +9,8 @@ Description: Mathematical formulation of M0.1 for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
+
 
 def compute_big_m(data: dict) -> float:
     """
@@ -153,4 +155,5 @@ def build_model_m0_1(data: dict) -> pyo.ConcreteModel:
 
     model.no_self_loop_constraint = pyo.Constraint(model.V, rule=no_self_loop_rule, doc="No self-loops")
 
+    forbid_blocked_arcs(model, data)
     return model

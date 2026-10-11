@@ -22,7 +22,7 @@ class AreaVisitDurationTest(unittest.TestCase):
         self.assertEqual(_area_service_times([12, 80, 700], 60, 0), [0, 60, 60, 60])
 
     def test_real_visits_follow_the_listing_areas(self):
-        data = load_instance("real", "m1", num_properties=8, random_seed=17, city="São Paulo", neighborhood="Moema")
+        data = load_instance("real", "m1", num_properties=8, random_seed=17, city="São Paulo")
         settings = INSTANCE_SETTINGS["m1"]
         expected = _area_service_times([listing["area"] for listing in data["listings"]], 60,
                                        settings["service_time_variation"])
@@ -34,13 +34,13 @@ class AreaVisitDurationTest(unittest.TestCase):
 
     def test_real_visits_follow_the_areas_with_an_auto_fleet(self):
         data = load_instance("real", "m1", num_properties=8, random_seed=17, num_brokers=AUTO_BROKERS,
-                             city="São Paulo", neighborhood="Moema")
+                             city="São Paulo")
         expected = _area_service_times([listing["area"] for listing in data["listings"]], 60, 30)
 
         self.assertEqual(data["service_times"], expected)
 
-    def test_m1_solves_a_real_neighborhood_with_area_durations(self):
-        data = load_instance("real", "m1", num_properties=8, random_seed=17, city="São Paulo", neighborhood="Moema")
+    def test_m1_solves_sao_paulo_with_area_durations(self):
+        data = load_instance("real", "m1", num_properties=8, random_seed=17, city="São Paulo")
 
         _, metrics = solve_model(build_model_m1(data), solver_name="gurobi_direct", mip_gap=0.0, raw=True)
         self.assertEqual(metrics["termination_condition"], "optimal")

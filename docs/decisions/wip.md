@@ -1,6 +1,6 @@
 # Work in progress
 
-Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. Nothing here has been implemented.
+Open decisions from the same discussion as [Capacity](capacity.md). That note covers whether the models need a load capacity and whether they may be called capacitated. This note covers the rest. The street distances and travel times are implemented, in [Distances and travel times](travel.md). The rest of this note is not.
 
 Names follow the renumbering. m1 was M7, m1.a was M9, m2 was M8, m0.5 was M5, and m0.6 was M6.
 
@@ -11,24 +11,17 @@ Two items from that discussion are already in the repository, so they are only r
 
 ## Distance in the objective
 
-The code stays as it is. The objective of m1, m1.a and m2 minimizes Euclidean distance $c_{ij}$. Travel time $t_{ij}$ is a separate parameter, used in the time-flow, window, shift and day-length constraints.
+The code stays as it is. The objective of m1, m1.a and m2 minimizes distance $c_{ij}$. On a synthetic instance that distance is the straight line times the detour factor. On a São Paulo instance it is the street-network distance. Travel time $t_{ij}$ is a separate parameter, used in the time-flow, window, shift and day-length constraints.
 
-They are proportional only because those three models run at one speed, `NORMAL_SPEED = [(0, 2.0)]`, about 30 km/h. The generator sets $t_{ij} = \lceil c_{ij} / v \rceil$. Minimizing distance then gives the same routes as minimizing driving time, except for near-ties that the rounding can break differently. The equivalence fails as soon as speed depends on the time of day, which is why m0.5 and m0.6 minimize time out of the base directly.
+On a synthetic instance, and on a real instance with no cached duration, the generator sets $t_{ij} = \lceil c_{ij} / v \rceil$. Those three models run at one speed, `NORMAL_SPEED = [(0, 2.0)]`, about 30 km/h, so minimizing distance then gives the same routes as minimizing driving time, except for near-ties that the rounding can break differently. On a São Paulo instance the duration is a free-flow shortest path scaled by the midday congestion factor, and that path can differ from the shortest-distance path, so the two objectives already differ. The equivalence also fails as soon as speed depends on the time of day, which is why m0.5 and m0.6 minimize time out of the base directly.
 
-The weak spot is units. The m1 and m1.a objectives add distance units to minutes of delay and overtime. m2 adds distance units to minutes of delay. A weight such as "a minute of delay costs 10" then means 10 distance units, which is hard to defend. Switching the travel term to $t_{ij}$ would put every term in minutes. That change was left for later. It is the change described in the next section but one, and it is not part of the street-network task.
+The weak spot is units. The m1 and m1.a objectives add distance units to minutes of delay and overtime. m2 adds distance units to minutes of delay. A weight such as "a minute of delay costs 10" then means 10 distance units, which is hard to defend. Switching the travel term to $t_{ij}$ would put every term in minutes. That change was left for later. It is [What the objective should minimize](#what-the-objective-should-minimize), and it is not part of the street-network task.
 
 ## Realistic distances and times
 
-Full real-time traffic, GPS traces and random travel times stay out of scope. The solver keeps fixed matrices, computed once and cached, so a run stays reproducible.
+This is implemented. The measurement, the congestion factors and the references are in [Distances and travel times](travel.md).
 
-The direction, which is not to be reopened:
-
-- **Real instances.** `data/real.csv` already has latitude and longitude. Build a street-network distance and duration matrix once per instance and cache it under `data/`. Use OSRM, self-hosted on an OpenStreetMap extract, or OSMnx (Boeing, 2017). The public OSRM demo server is not for repeated use. One-way streets make the matrices asymmetric. The models already use directed arcs. OSRM durations are free-flow, so scale them by a few congestion factors by time of day, cited from a public source such as the TomTom Traffic Index. A one-off calibration against a routes API is an alternative source for those factors.
-- **Synthetic instances.** Points on the 100×100 map are not on a street network, so keep Euclidean distance and multiply it by a detour factor. Measure that factor on sampled pairs of real properties, as road distance over straight-line distance, rather than assuming it. Published comparisons put road distance at about 1.2 to 1.4 times the straight line (Ballou, Rahardja and Sakai, 2002; Boscoe, Henry and Zdeb, 2012). Ballou, Rahardja and Sakai report 1.23 for Brazil. That number is a check, not the factor the generator should hard-code.
-- **Rush hours.** m0.5 and m0.6 take the travel time of the period the trip leaves in, so the time can jump at a period boundary. Leaving later can then arrive earlier, which breaks FIFO. The known fix is a speed that changes partway through the trip (Ichoua, Gendreau and Potvin, 2003). Mention it in the thesis. Implement it only if it fits the current m0.5 and m0.6 formulation without a rewrite.
-- **Out of scope.** Live traffic and stochastic travel times (Taş, Dellaert, van Woensel and de Kok, 2013) are one paragraph of future work.
-
-The street-network task does not switch the objective from distance to travel time. A prompt for a separate chat was written with that limit.
+Live traffic, GPS traces and random travel times stay out of scope (Taş, Dellaert, van Woensel and de Kok, 2013). The street-network task does not switch the objective from distance to travel time.
 
 ## What the objective should minimize
 
@@ -81,15 +74,9 @@ Writing the formulations showed two facts about the code that the thesis should 
 
 ## References
 
-Ballou, R. H., Rahardja, H., & Sakai, N. (2002). Selected country circuity factors for road travel distance estimation. *Transportation Research Part A: Policy and Practice*, 36(9), 843–848. https://doi.org/10.1016/S0965-8564(01)00044-1
-
 Bektaş, T., & Laporte, G. (2011). The pollution-routing problem. *Transportation Research Part B: Methodological*, 45(8), 1232–1250. https://doi.org/10.1016/j.trb.2011.02.004
 
-Boeing, G. (2017). OSMnx: New methods for acquiring, constructing, analyzing, and visualizing complex street networks. *Computers, Environment and Urban Systems*, 65, 126–139. https://doi.org/10.1016/j.compenvurbsys.2017.05.004
-
 Boland, N., Charkhgard, H., & Savelsbergh, M. (2015). A criterion space search algorithm for biobjective integer programming: The balanced box method. *INFORMS Journal on Computing*, 27(4), 735–754. https://doi.org/10.1287/ijoc.2015.0657
-
-Boscoe, F. P., Henry, K. A., & Zdeb, M. S. (2012). A nationwide comparison of driving distance versus straight-line distance to hospitals. *The Professional Geographer*, 64(2), 188–196. https://doi.org/10.1080/00330124.2011.583586
 
 Braekers, K., Hartl, R. F., Parragh, S. N., & Tricoire, F. (2016). A bi-objective home care scheduling problem: Analyzing the trade-off between costs and client inconvenience. *European Journal of Operational Research*, 248(2), 428–443. https://doi.org/10.1016/j.ejor.2015.07.028
 

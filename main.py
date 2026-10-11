@@ -21,8 +21,8 @@ Usage:
     python main.py --model m1 --seed 7    # Another reproducible instance
     python main.py --model m0.2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
 
-    python main.py --model m1 --dataset real --city "São Paulo" --neighborhood Moema    # Real listings
     python main.py --model m1 --dataset real --city "São Paulo"    # Real listings of the whole city
+    python main.py --model m1 --dataset real --city "São Paulo" --neighborhood Moema    # One neighborhood of it
 """
 
 import argparse

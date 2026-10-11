@@ -7,6 +7,8 @@ Description: Mathematical formulation of the Base Model (M0.0) for the WSRP.
 
 import pyomo.environ as pyo
 
+from src.models.blocked import forbid_blocked_arcs
+
 def build_model_m0_0(data: dict) -> pyo.ConcreteModel:
     """
     Constructs the MILP polyhedron for the M0.0 routing problem (TSP).
@@ -91,4 +93,5 @@ def build_model_m0_0(data: dict) -> pyo.ConcreteModel:
 
     model.no_self_loop_constraint = pyo.Constraint(model.V, rule=no_self_loop_rule, doc="No self-loops")
 
+    forbid_blocked_arcs(model, data)
     return model
