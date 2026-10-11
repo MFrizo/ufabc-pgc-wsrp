@@ -13,9 +13,11 @@ from src.models.model_0_6 import build_model_m0_6
 from src.models.model_1 import build_model_m1, LUNCH_DURATION, LUNCH_WINDOW, MAX_DAY_LENGTH
 from src.models.model_1_a import build_model_m1_a
 from src.models.model_2 import build_model_m2
+from src.models.model_3 import build_model_m3
 
 # m0.0 to m0.6 are the sub-steps that build up to m1, the first complete model.
 # m1.a is the subcase of m1 with a share of the visits booked. m2 is broker-focused.
+# m3 is the Pareto front between the agency's objective and the brokers'.
 BUILDERS = {
     'm0.0': build_model_m0_0,  # Sub-step: TSP
     'm0.1': build_model_m0_1,  # Sub-step: TSPTW
@@ -27,13 +29,14 @@ BUILDERS = {
     'm1': build_model_m1,  # First complete model: MO-DOMDVRPTW-SD
     'm1.a': build_model_m1_a,  # Subcase of m1: a share of the visits booked
     'm2': build_model_m2,  # Broker-focused model: HC-DOMDVRPTW-SD
+    'm3': build_model_m3,  # Pareto front of the agency and the brokers
 }
 
 # Models that route a single broker, so they ignore a number of brokers
 SINGLE_BROKER_MODELS = ('m0.0', 'm0.1')
 
 # Models that book every visit at its earliest start h_i, so every visit has a strict time
-STRICT_TIME_MODELS = ('m1', 'm2')
+STRICT_TIME_MODELS = ('m1', 'm2', 'm3')
 
 # Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day.
 # Synthetic trips and drawn points use these speeds. A cached real street duration is
@@ -63,6 +66,7 @@ INSTANCE_SETTINGS = {
     'm1.a': {**_M1_SETTINGS, 'fixed_ratio': 0.5},
     'm2': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
            'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # own shifts, one broker off
+    'm3': {**_M1_SETTINGS, 'days_off': 1},  # M1's day, plus one broker off, for the front
 }
 
 # Seed of each model's default run
