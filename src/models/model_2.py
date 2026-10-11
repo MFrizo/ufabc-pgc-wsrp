@@ -5,10 +5,9 @@ Description: Mathematical formulation of M2 for the WSRP.
              with Soft Time Windows and Site-Dependency (HC-DOMDVRPTW-SD), focused on the
              brokers: each broker works his own morning shift, from home to the place he
              picks for lunch, and afternoon shift, from there back home, and no visit goes
-             past the end of a shift. A weighted sum of the travel time, which includes the trip
-             from the last visit of each shift to its destination, of the delays, and of the
-             longest time a working broker is out, is minimized. Distance only breaks ties
-             between plans with the same time.
+             past the end of a shift. The fuel the brokers pay is minimized. A broker is paid
+             when a deal closes, so the model has no price for his hour. Delay and the longest
+             time a working broker is out only break ties between plans with the same fuel.
              Models the initial optimization of the day; re-running it when the visits
              change, from the brokers' current positions, is up to the caller.
 """
@@ -16,13 +15,33 @@ Description: Mathematical formulation of M2 for the WSRP.
 import pyomo.environ as pyo
 
 from src.models.blocked import forbid_blocked_arcs
-from src.models.model_1 import DELAY_WEIGHT, TRAVEL_WEIGHT, tie_break_distance_weight
 
 # Rules of M2, in minutes
 DELAY_TOLERANCE = 10            # tol: Max minutes a visit starts early or late
 
-# Default weights of the multi-objective function
-FAIRNESS_WEIGHT = 10.0          # W_fair: Penalty per minute of the busiest working broker's time out
+# Fuel of a Volkswagen Polo 1.0 MPI in the city, the best-selling passenger car in the
+# Fenabrave ranking of September 2026. INMETRO PBEV, table of 14 August 2026: 9.3 km/L
+# on ethanol in the urban cycle. ANP, city of São Paulo, week of 4–10 October 2026:
+# ethanol R$ 3.91/L (209 stations). Ethanol is cheaper per kilometre than gasoline at
+# R$ 6.34/L and 13.5 km/L, because 3.91/6.34 is below 9.3/13.5. The map has 4 units per
+# kilometre, the same scale as MAP_UNITS_PER_KM in src/core/listings.py.
+ETHANOL_REAIS_PER_LITRE = 3.91
+POLO_URBAN_KM_PER_LITRE = 9.3
+MAP_UNITS_PER_KM = 4.0
+FUEL_REAIS_PER_MAP_UNIT = ETHANOL_REAIS_PER_LITRE / POLO_URBAN_KM_PER_LITRE / MAP_UNITS_PER_KM
+MIN_MAP_STEP = 0.01             # Distances are rounded to two decimals
+
+
+def tie_break_minute_weight(max_minutes: float) -> float:
+    """
+    Weight of one minute that cannot outweigh the smallest fuel cost.
+
+    The generator records distance to two decimals, so the smallest gap between two
+    different distances is one hundredth of a map unit. Every minute of delay and of the
+    longest day, added up to max_minutes, is worth less than the fuel of that gap.
+    """
+    smallest_fuel = FUEL_REAIS_PER_MAP_UNIT * MIN_MAP_STEP
+    return smallest_fuel / (max_minutes + 1.0)
 
 
 def build_model_m2(data: dict) -> pyo.ConcreteModel:
@@ -46,10 +65,11 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
             - 'service_times' (list): Duration s_i of the visit at every property.
             - 'earliest_start' (list): Scheduled start h_i of the visit at every property.
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
-            - 'travel_weight', 'distance_weight', 'delay_weight', 'fairness_weight' (float, optional):
-              Weights of the objective. fairness_weight charges each minute of the longest time
-              a broker who works is out. 0 turns that term off. The distance weight, if absent,
-              only breaks ties between plans whose travel time, delay and workload are equal.
+            - 'fuel_cost' (float, optional): Reais per map unit of distance. Absent, the Polo
+              ethanol cost above.
+            - 'delay_weight', 'fairness_weight' (float, optional): Reais charged for each minute
+              of delay and of the longest time a broker who works is out. Absent, both only
+              break ties between plans with the same fuel. 0 turns that term off.
 
     Returns:
         pyo.ConcreteModel: The unoptimized abstract mathematical model.
@@ -173,16 +193,14 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
                      + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
     model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
 
-    # W_time, W_dist, W_atraso, W_fair: Weights of the driving time, the distance tie-break,
-    # the delays and the longest time out. Each property is left once, and each shift leaves
-    # its origin at most once.
-    paid_arcs = num_properties + num_routes
-    max_distance = max(pyo.value(model.distance[arc]) for arc in model.ARCS)
-    model.travel_weight = pyo.Param(initialize=data.get('travel_weight', TRAVEL_WEIGHT), doc="W_time")
-    model.distance_weight = pyo.Param(
-        initialize=data.get('distance_weight', tie_break_distance_weight(paid_arcs, max_distance)), doc="W_dist")
-    model.delay_weight = pyo.Param(initialize=data.get('delay_weight', DELAY_WEIGHT), doc="W_atraso")
-    model.fairness_weight = pyo.Param(initialize=data.get('fairness_weight', FAIRNESS_WEIGHT), doc="W_fair")
+    # Fuel is reais per map unit. Delay and the longest day only break a tie: a broker is
+    # paid when a deal closes, so a minute of his time has no price of its own.
+    max_shifts = max((len(broker_shifts) for broker_shifts in data['shifts']), default=1)
+    max_minutes = num_properties * DELAY_TOLERANCE + horizon * max_shifts
+    minute_weight = tie_break_minute_weight(max_minutes)
+    model.fuel_cost = pyo.Param(initialize=data.get('fuel_cost', FUEL_REAIS_PER_MAP_UNIT), doc="Reais per map unit")
+    model.delay_weight = pyo.Param(initialize=data.get('delay_weight', minute_weight), doc="W_atraso")
+    model.fairness_weight = pyo.Param(initialize=data.get('fairness_weight', minute_weight), doc="W_fair")
 
     # =========================================================================
     # 3. DECISION VARIABLES
@@ -210,16 +228,14 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     # 4. OBJECTIVE FUNCTION
     # =========================================================================
     def objective_rule(model_instance):
-        """Minimize W_time * sum(t_ij * x_ijtk) + W_dist * sum(c_ij * x_ijtk) + W_atraso * sum(atraso_i) + W_fair * Omega."""
-        return (model_instance.travel_weight * sum(model_instance.travel_time[arc] * model_instance.x[arc]
-                                                   for arc in model_instance.ARCS)
-                + model_instance.distance_weight * sum(model_instance.distance[arc] * model_instance.x[arc]
-                                                       for arc in model_instance.ARCS)
+        """Minimize the fuel paid on the driven arcs, then delay and the longest workload as tie-breaks."""
+        return (model_instance.fuel_cost * sum(model_instance.distance[arc] * model_instance.x[arc]
+                                               for arc in model_instance.ARCS)
                 + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C)
                 + model_instance.fairness_weight * model_instance.max_workload)
 
     model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize,
-                              doc="Minimize travel time, delays and the longest workload")
+                              doc="Minimize the fuel the brokers pay")
 
     # =========================================================================
     # 5. CONSTRAINTS
