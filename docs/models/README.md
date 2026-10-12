@@ -39,3 +39,7 @@ Each page lists the sets, parameters, decision variables, objective function and
 ## Instance settings
 
 Each model runs on `generate_wsrp_instance` with its entry of `INSTANCE_SETTINGS` in `src/models/__init__.py` on top of the generator defaults: 5 properties, $T = 30$, $S = 60$, a 600-minute day, `fixed_ratio = 0.2` and 40% of the visits assigned to a broker. `--fixed-ratio` in `main.py` overrides the share of booked visits, except for M1, M2 and M3. The settings of each model are listed on its page.
+
+## Experiments
+
+Shared-input runs of M1, M1.a, M2 and M3 on the real catalog, and the tables where those runs are logged, are in [Complete models on the real catalog](../experiments/complete-models.md).
