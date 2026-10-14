@@ -21,6 +21,7 @@ Usage:
     python main.py --model m1 --properties 12 --brokers auto    # Fleet drawn from the instance
     python main.py --model m1 --seed 7    # Another reproducible instance
     python main.py --model m0.2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
+    python main.py --model m1 --no-hidden-schedule    # Booked starts drawn on their own; the instance may be infeasible
 
     python main.py --model m1 --dataset real --city "São Paulo"    # Real listings of the whole city
     python main.py --model m1 --dataset real --city "São Paulo" --neighborhood Moema    # One neighborhood of it
@@ -39,7 +40,8 @@ from src.utils.parsers import print_results
 
 def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = None,
          dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None,
-         random_seed: Optional[int] = None, fixed_ratio: Optional[float] = None):
+         random_seed: Optional[int] = None, fixed_ratio: Optional[float] = None,
+         hidden_schedule: Optional[bool] = None):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -59,6 +61,9 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
             the others may start at any time of the day. m1, m2 and m3 warn and ignore it. None keeps
             the model's own setting.
+        hidden_schedule (Optional[bool]): Whether the time windows come from a hidden reference day
+            that keeps the instance feasible. False draws each booked start on its own and lets the
+            solver receive an instance that may be infeasible. None keeps the generator default, on.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
@@ -75,7 +80,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
                         f"{brokers} brokers, seed {random_seed})...")
     data_payload = load_instance(dataset, model_version, num_properties=num_properties, random_seed=random_seed,
                                  num_brokers=num_brokers, city=city, neighborhood=neighborhood,
-                                 fixed_ratio=fixed_ratio)
+                                 fixed_ratio=fixed_ratio, hidden_schedule=hidden_schedule)
     num_fixed = len(data_payload['fixed_visits'])
     project_logger.info(f"Visits: {num_fixed} at a strict time, {num_properties - num_fixed} at any time.")
     if 'schedule_brokers' in data_payload:
@@ -171,6 +176,9 @@ if __name__ == "__main__":
                              "distribution over each broker's free time. m1, m2 and m3 book every visit, so they warn "
                              "and ignore it; m1.a is m1 with this share of the visits booked (default: the model's "
                              "own setting)")
+    parser.add_argument('--no-hidden-schedule', action='store_true',
+                        help="Draw each booked start on its own, without the feasible reference day, "
+                             "so the solver may receive an infeasible instance (default: the hidden schedule is on)")
     parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
                         help="Instance source: the synthetic generator, or the real rental catalog of a "
                              "Brazilian real estate company (default: synthetic)")
@@ -182,4 +190,5 @@ if __name__ == "__main__":
     if args.dataset == 'real' and not args.city:
         parser.error("--dataset real requires --city")
     main(args.model, num_properties=args.properties, num_brokers=args.brokers, dataset=args.dataset,
-         city=args.city, neighborhood=args.neighborhood, random_seed=args.seed, fixed_ratio=args.fixed_ratio)
+         city=args.city, neighborhood=args.neighborhood, random_seed=args.seed, fixed_ratio=args.fixed_ratio,
+         hidden_schedule=False if args.no_hidden_schedule else None)

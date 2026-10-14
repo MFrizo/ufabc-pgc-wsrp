@@ -54,7 +54,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            graph: Optional[dict[str, Any]] = None,
                            max_routing_arcs: int = MAX_ROUTING_ARCS,
                            areas: Optional[list[float]] = None,
-                           home_region: Optional[list[list[float]]] = None) -> dict[str, Any]:
+                           home_region: Optional[list[list[float]]] = None,
+                           hidden_schedule: bool = True) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -104,6 +105,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         home_region (Optional[list[list[float]]]): (x, y) of the vertices of a convex polygon,
             e.g. the city of real listings. Each broker's home is then drawn uniformly inside
             it instead of on the 100x100 map.
+        hidden_schedule (bool): Whether the time windows come from a hidden reference day that
+            keeps the instance feasible. False draws each booked start on its own and does not
+            refuse an instance the visits cannot pack, so the solver may prove it infeasible.
 
     Returns:
         dict[str, Any]: The instance payload. Keys and the models that read them:
@@ -125,8 +129,9 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
               drawn from.
 
     Raises:
-        ValueError: If the visits don't fit in the shifts, or in the longest working day, or
-            the graph does not have num_properties + 1 nodes, or areas num_properties values.
+        ValueError: If the hidden schedule is on and the visits don't fit in the shifts, or
+            in the longest working day, or the graph does not have num_properties + 1 nodes,
+            or areas has not num_properties values.
     """
     if not 0 <= fixed_ratio <= 1:
         raise ValueError(f"fixed_ratio must be between 0 and 1, not {fixed_ratio}.")
@@ -138,6 +143,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             'working_hours': working_hours, 'start_at_homes': start_at_homes, 'days_off': days_off,
             'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
             'graph': graph, 'areas': areas, 'home_region': home_region,
+            'hidden_schedule': hidden_schedule,
         })
 
     num_nodes = num_properties + 1
@@ -178,10 +184,17 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         first_legs = [leg_times[0]] * num_brokers
     lunch_legs = np.max(data_payload['lunch_spot_travel_times'], axis=0).tolist()
 
-    time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
-                                          data_payload['service_times'], horizon, fixed_ratio,
-                                          data_payload['shifts'] if split_shifts else None, lunch_legs,
-                                          lunch_break, max_day_length)
+    if hidden_schedule:
+        time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
+                                              data_payload['service_times'], horizon, fixed_ratio,
+                                              data_payload['shifts'] if split_shifts else None, lunch_legs,
+                                              lunch_break, max_day_length)
+    else:
+        # No reference day and no fit check: booked starts are independent, and a set the
+        # visits cannot pack is the solver's to reject.
+        time_windows = _independent_time_windows(num_nodes, random_seed, data_payload['service_times'],
+                                                 horizon, fixed_ratio)
+    data_payload['hidden_schedule'] = hidden_schedule
     reference_broker = time_windows.pop('reference_broker')
     data_payload.update(time_windows)
     data_payload['assigned_broker'] = _generate_assignments(num_nodes, random_seed, reference_broker,
@@ -577,6 +590,52 @@ def _place_visits(rng: np.random.Generator, visits: list[int], first_leg: list[i
         reference_start[node] = math.floor(day_start + busy + idle_before[position])
         busy += service_times[node]
         previous = node
+
+
+def _independent_time_windows(num_nodes: int, random_seed: int, service_times: list[int], horizon: int,
+                             fixed_ratio: float) -> dict[str, Any]:
+    """
+    Time windows with no hidden schedule.
+
+    The same share of visits is booked, and each booked start is drawn on its own,
+    uniformly from the start of the day until the visit can still finish by the horizon.
+    Nothing packs the visits into a route, so the set may be infeasible.
+
+    Args:
+        num_nodes (int): Total number of nodes |V|. Index 0 is the depot.
+        random_seed (int): Seed for the PRNG to ensure scientific reproducibility.
+        service_times (list[int]): Duration s_i of the visit at each node, in minutes.
+        horizon (int): Length of the day the windows are drawn in, in minutes.
+        fixed_ratio (float): Share of the properties with a fixed start time, from 0 to 1.
+
+    Returns:
+        dict[str, Any]: The time windows (e_i, l_i), the fixed visits, and a reference
+            broker of 0 for every node (no visit belongs to a hidden route).
+    """
+    rng = np.random.default_rng([random_seed, TIME_WINDOWS_STREAM])
+    num_properties = num_nodes - 1
+    earliest_start = [0] * num_nodes
+    latest_start = [horizon] * num_nodes
+
+    num_fixed = round(fixed_ratio * num_properties)
+    fixed_visits = [] if num_fixed == 0 else sorted(
+        int(node) for node in rng.choice(np.arange(1, num_nodes), size=num_fixed, replace=False))
+
+    for node in range(1, num_nodes):
+        room = max(0, horizon - service_times[node])
+        if node in fixed_visits:
+            start = int(rng.integers(0, room + 1))
+            earliest_start[node] = start
+            latest_start[node] = start
+        else:
+            latest_start[node] = room
+
+    return {
+        'earliest_start': earliest_start,
+        'latest_start': latest_start,
+        'fixed_visits': fixed_visits,
+        'reference_broker': [0] * num_nodes,
+    }
 
 
 def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, leg_times: list[list[int]],
