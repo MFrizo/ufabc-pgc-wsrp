@@ -38,7 +38,8 @@ MAP_CENTER = (50.0, 50.0)
 
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
                   num_brokers: Optional[Union[int, str]] = None, city: Optional[str] = None,
-                  neighborhood: Optional[str] = None, fixed_ratio: Optional[float] = None) -> dict[str, Any]:
+                  neighborhood: Optional[str] = None, fixed_ratio: Optional[float] = None,
+                  hidden_schedule: Optional[bool] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
 
@@ -57,6 +58,10 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to
             1; the others may start at any time of the day. STRICT_TIME_MODELS warn and ignore
             it. None keeps the model's own setting.
+        hidden_schedule (Optional[bool]): Whether the time windows come from a hidden reference
+            day that keeps the instance feasible. False draws each booked start on its own and
+            does not refuse an instance the visits cannot pack, so the solver may prove it
+            infeasible. None keeps the generator default, which is on.
 
     Returns:
         dict[str, Any]: The instance payload. A real instance also carries 'listings'.
@@ -85,6 +90,11 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         instance_settings['num_brokers'] = num_brokers
     if fixed_ratio is not None:
         instance_settings['fixed_ratio'] = fixed_ratio
+    if hidden_schedule is not None:
+        instance_settings['hidden_schedule'] = hidden_schedule
+    if instance_settings.get('hidden_schedule', True) is False:
+        project_logger.info("Hidden schedule is off; booked starts are drawn on their own "
+                            "and the solver may prove the instance infeasible.")
 
     if dataset == "synthetic":
         return generate_wsrp_instance(num_properties=num_properties, random_seed=random_seed, **instance_settings)
