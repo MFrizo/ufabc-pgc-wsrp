@@ -12,19 +12,17 @@ Usage:
     python main.py --model m0.4    # Sub-step: VRPTWWVST
     python main.py --model m0.5    # Sub-step: TDVRPTW
     python main.py --model m0.6    # Sub-step: FSMVRPTW
-    python main.py --model m1      # First complete model: MO-DOMDVRPTW-SD
-    python main.py --model m1.a --fixed-ratio 0.25    # Subcase of m1: a quarter of the visits booked
+    python main.py --model m1      # Moema, 5 houses, 3 brokers, seed 8, gap 0, 30 min
+    python main.py --model m1.a    # Same instance; the booked share stays the model's own
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
     python main.py --model m3      # Pareto front of the agency and the brokers
 
-    python main.py --model m1 --properties 12 --brokers 4    # Custom instance size
-    python main.py --model m1 --properties 12 --brokers auto    # Fleet drawn from the instance
-    python main.py --model m1 --seed 7    # Another reproducible instance
-    python main.py --model m0.2 --fixed-ratio 0.5    # Half the visits at a strict time, half at any time
-    python main.py --model m1 --no-hidden-schedule    # Booked starts drawn on their own; the instance may be infeasible
-
-    python main.py --model m1 --dataset real --city "São Paulo"    # Real listings of the whole city
-    python main.py --model m1 --dataset real --city "São Paulo" --neighborhood Moema    # One neighborhood of it
+    python main.py --properties 12 --brokers 4    # Custom instance size
+    python main.py --brokers auto    # Fleet drawn from the instance
+    python main.py --seed 7    # Another reproducible instance
+    python main.py --neighborhood ""    # The whole city of São Paulo
+    python main.py --dataset synthetic    # The generator instead of the catalog
+    python main.py --no-hidden-schedule    # Booked starts drawn on their own; the instance may be infeasible
 """
 
 import argparse
@@ -38,9 +36,9 @@ from src.solvers.engine import solve_model
 from src.utils.parsers import print_results
 
 
-def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = None,
-         dataset: str = "synthetic", city: Optional[str] = None, neighborhood: Optional[str] = None,
-         random_seed: Optional[int] = None, fixed_ratio: Optional[float] = None,
+def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = 3,
+         dataset: str = "real", city: Optional[str] = "São Paulo", neighborhood: Optional[str] = "Moema",
+         random_seed: Optional[int] = 8, fixed_ratio: Optional[float] = None,
          hidden_schedule: Optional[bool] = None):
     """
     Main execution pipeline for local development and benchmarking.
@@ -51,13 +49,13 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M0.2 onwards;
             m0.0 and m0.1 warn and ignore it. "auto" draws it between the fewest brokers the visits
             need and the most the solver can take. None keeps the model's own setting in
-            src.models.INSTANCE_SETTINGS.
-        dataset (str): "synthetic" for the generator, "real" for the real rental catalog.
+            src.models.INSTANCE_SETTINGS. The complete-model series uses 3.
+        dataset (str): "real" for the rental catalog, "synthetic" for the generator.
         city (Optional[str]): City of the real listings. Required when dataset is "real".
         neighborhood (Optional[str]): Neighborhood of the real listings, inside that city. None
-            samples the whole city.
+            samples the whole city. The series starts in Moema.
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
-            src.models.DEFAULT_SEEDS or DEFAULT_SEED.
+            src.models.DEFAULT_SEEDS or DEFAULT_SEED. The series uses 8.
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
             the others may start at any time of the day. m1, m2 and m3 warn and ignore it. None keeps
             the model's own setting.
@@ -122,8 +120,9 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     solved_model, metrics = solve_model(
         model=abstract_model,
         solver_name='gurobi_direct',
+        time_limit=1800,
         mip_gap=0.0,
-        raw=True
+        raw=False
     )
 
     # ---------------------------------------------------------
@@ -162,14 +161,12 @@ if __name__ == "__main__":
                         help="Model to execute (default: m1, the first complete model)")
     parser.add_argument('--properties', type=int, default=5,
                         help="Number of properties to visit (default: 5)")
-    parser.add_argument('--brokers', type=_brokers, default=None,
+    parser.add_argument('--brokers', type=_brokers, default=3,
                         help="Number of brokers, read from M0.2 onwards (m0.0 and m0.1 warn and ignore it), or 'auto' "
                              "to draw it between the fewest the visits need and the most the solver takes "
-                             "(default: the model's own setting)")
-    parser.add_argument('--seed', type=int, default=None,
-                        help=f"Seed of the instance; each seed is another reproducible instance "
-                             f"(default: the model's own, {DEFAULT_SEED}, or "
-                             + ", ".join(f"{seed} for {model}" for model, seed in DEFAULT_SEEDS.items()) + ")")
+                             "(default: 3)")
+    parser.add_argument('--seed', type=int, default=8,
+                        help="Seed of the instance; each seed is another reproducible instance (default: 8)")
     parser.add_argument('--fixed-ratio', type=_ratio, default=None,
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
@@ -179,13 +176,14 @@ if __name__ == "__main__":
     parser.add_argument('--no-hidden-schedule', action='store_true',
                         help="Draw each booked start on its own, without the feasible reference day, "
                              "so the solver may receive an infeasible instance (default: the hidden schedule is on)")
-    parser.add_argument('--dataset', choices=DATASETS, default='synthetic',
-                        help="Instance source: the synthetic generator, or the real rental catalog of a "
-                             "Brazilian real estate company (default: synthetic)")
-    parser.add_argument('--city', default=None,
-                        help="City of the real listings. Required with --dataset real")
-    parser.add_argument('--neighborhood', default=None,
-                        help="Neighborhood of the real listings, inside --city (default: the whole city)")
+    parser.add_argument('--dataset', choices=DATASETS, default='real',
+                        help="Instance source: the real rental catalog of a Brazilian real estate company, "
+                             "or the synthetic generator (default: real)")
+    parser.add_argument('--city', default='São Paulo',
+                        help="City of the real listings. Required with --dataset real (default: São Paulo)")
+    parser.add_argument('--neighborhood', default='Moema',
+                        help="Neighborhood of the real listings, inside --city. An empty string samples the "
+                             "whole city (default: Moema)")
     args = parser.parse_args()
     if args.dataset == 'real' and not args.city:
         parser.error("--dataset real requires --city")
