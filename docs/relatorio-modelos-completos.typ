@@ -1,7 +1,7 @@
 #set document(
   title: "Modelos completos M1, M2 e M3",
   author: "UFABC — PGC — WSRP",
-  date: datetime(year: 2026, month: 10, day: 12),
+  date: datetime(year: 2026, month: 10, day: 14),
 )
 #set page(
   paper: "a4",
@@ -33,7 +33,7 @@
   #v(0.45cm)
   #text(size: 13pt)[M1, M2 e M3: formulação, gerador, decisões e experimentos no catálogo real de São Paulo]
   #v(1.4cm)
-  #text(size: 11pt)[12 de outubro de 2026]
+  #text(size: 11pt)[14 de outubro de 2026]
   #v(1fr)
   #text(size: 9.5pt)[
     Este texto reúne as páginas dos modelos, as notas de decisão e o registro
@@ -88,6 +88,8 @@ cal(A) = union.big_(k in K) (
   union {(a_k, j, k) : j in C union {f_k}}
 )
 $
+
+$(i, j, k)$ e $(j, i, k)$ são arcos diferentes. A distância e o tempo que entram no objetivo e no relógio são os da direção percorrida: o modelo lê $c_(i j)$ e $t_(i j)$, e não iguala um sentido ao outro. O M2 e o M3 usam o mesmo tipo de arco. Numa instância de São Paulo os dois sentidos vêm da rede de direção, então uma rua de mão única os separa. Se não há caminho de carro de $i$ para $j$, só esse sentido sai do conjunto: a variável daquele arco fica fixa em zero, e o retorno continua se o caminho existir. Numa instância sintética os dois sentidos coincidem, porque a distância é a reta vezes o fator de desvio. A casa do corretor e o ponto de almoço são pontos sorteados, então essas pernas ficam em linha reta nos dois sentidos mesmo em São Paulo.
 
 == Parâmetros
 
@@ -487,7 +489,7 @@ Uma instância de São Paulo usa distância de rede viária e duração em fluxo
 
 O índice guarda toda coordenada distinta de anúncio em São Paulo, arredondada a seis casas decimais, cerca de 0,1 m. São 6.874 anúncios e 3.354 coordenadas. Moema tem 619 anúncios. Qualquer amostra da cidade usa o índice quando cada imóvel é uma dessas coordenadas, com ou sem bairro. Uma cidade que não seja São Paulo não está no índice e permanece na distância em linha reta.
 
-Cada anúncio e a agência são presos ao nó do grafo mais próximo. Um encaixe além de 400 m é recusado. A distância é o comprimento do caminho mínimo, em metros. A duração é o caminho mínimo sob o tempo de fluxo livre, em segundos. Os dois pesos podem escolher caminhos diferentes. O grafo é direcionado: uma rua de mão única faz $(i, j)$ diferir de $(j, i)$, e as duas direções são guardadas. Os modelos já indexam arcos direcionados.
+Cada anúncio e a agência são presos ao nó do grafo mais próximo. Um encaixe além de 400 m é recusado. A distância é o comprimento do caminho mínimo, em metros. A duração é o caminho mínimo sob o tempo de fluxo livre, em segundos. Os dois pesos podem escolher caminhos diferentes. O grafo de ruas é direcionado, e os modelos já o resolvem assim, como na formulação do M1: cada sentido é um arco, com a sua distância e o seu tempo. Uma rua de mão única faz $(i, j)$ diferir de $(j, i)$, e as duas direções ficam guardadas.
 
 Os metros viram unidades do mapa, 4 por quilômetro, arredondadas a duas casas, para a distância de rua sentar no mesmo mapa $100 times 100$ de uma instância sintética. Os segundos viram minutos, arredondados a quatro casas. A projeção que posiciona os nós é equirretangular, centrada no centroide dos imóveis da amostra, com 110,574 km por grau de latitude e 111,320 km por grau de longitude. A agência, nó 0, fica nesse centroide, no ponto $(50, 50)$ do mapa. M1, M2 e M3 não roteiam a partir dela.
 

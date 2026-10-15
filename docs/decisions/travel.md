@@ -16,7 +16,7 @@ The MILP has to be the same model every time a seed is run. A live routes API, a
 
 The network is the OpenStreetMap drive graph, downloaded with OSMnx 2.1.1 on 10 October 2026 (Boeing, 2017). The map data are © OpenStreetMap contributors. Each listing and the agency are snapped to the nearest graph node. A snap farther than 400 m is refused. The distance is the shortest-path length in meters. The duration is the shortest path under free-flow travel time in seconds. The two weights can pick different paths.
 
-The graph is directed. A one-way street makes $(i, j)$ differ from $(j, i)$, and both directions are kept. The models already index directed arcs.
+The graph is directed, and the models already solve it that way. The arc from $i$ to $j$ is a different variable from the arc back. The objective and the clock read $c_{ij}$ and $t_{ij}$ of the direction that is travelled. A one-way street makes those two numbers differ, and both directions are stored. If no drive path runs from $i$ to $j$, only that crossing is fixed at zero. The return remains an arc when a path exists. A synthetic map still has equal directions, because its distance is the straight line times the detour factor. Broker homes and lunch spots are drawn points, so those legs stay straight-line in both directions.
 
 Meters become the generator's map units, 4 per kilometer, rounded to two decimals, so a street distance sits on the same $100 \times 100$ map as a synthetic one. Seconds become minutes, rounded to four decimals, and the MILP then sees a whole number of minutes.
 
