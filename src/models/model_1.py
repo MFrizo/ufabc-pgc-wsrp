@@ -309,8 +309,10 @@ def build_model_m1(data: dict) -> pyo.ConcreteModel:
 
     # 5.5 Working Day: a broker doesn't leave home before his day starts, the end of his
     # day past its regular end is overtime, and his whole day, lunch included, never goes
-    # past the legal limit
-    # Formula: w_dk >= E_k, w_fk <= L_k + he_k, w_fk - w_dk <= J_max
+    # past the legal limit — both on the clock and as the sum of services and trips
+    # Formula: w_dk >= E_k, w_fk <= L_k + he_k, w_fk - w_dk <= J_max,
+    #          sum_{(i,j)} (s_i + t^k_ij) x_ijk <= J_max * y_k,
+    #          sum_{i in C} s_i + sum_{(i,j,k)} t^k_ij x_ijk <= sum_k (J_max - s_ak) y_k
     def day_start_rule(model_instance, k):
         return model_instance.w[model_instance.depot[k]] >= model_instance.shift_start[k]
 
@@ -321,9 +323,22 @@ def build_model_m1(data: dict) -> pyo.ConcreteModel:
         return (model_instance.w[model_instance.end[k]] - model_instance.w[model_instance.depot[k]]
                 <= model_instance.max_day_length)
 
+    def route_duration_rule(model_instance, k):
+        return (sum((model_instance.service[i] + model_instance.travel_time[i, j, k]) * model_instance.x[i, j, k]
+                    for (i, j, broker) in model_instance.ARCS if broker == k)
+                <= model_instance.max_day_length * model_instance.y[k])
+
+    def fleet_duration_rule(model_instance):
+        return (sum(model_instance.service[i] for i in model_instance.C)
+                + sum(model_instance.travel_time[arc] * model_instance.x[arc] for arc in model_instance.ARCS)
+                <= sum((model_instance.max_day_length - model_instance.service[model_instance.lunch[k]])
+                       * model_instance.y[k] for k in model_instance.K))
+
     model.day_start_constraint = pyo.Constraint(model.K, rule=day_start_rule, doc="Constraint 5.5 start")
     model.day_end_constraint = pyo.Constraint(model.K, rule=day_end_rule, doc="Constraint 5.5 end")
     model.day_length_constraint = pyo.Constraint(model.K, rule=day_length_rule, doc="Constraint 5.5 length")
+    model.route_duration_constraint = pyo.Constraint(model.K, rule=route_duration_rule, doc="Constraint 5.5 duration")
+    model.fleet_duration_constraint = pyo.Constraint(rule=fleet_duration_rule, doc="Constraint 5.5 fleet duration")
 
     # 5.6 Lunch Break: a broker who works goes through his lunch node, starting it
     # between 11:00 and 14:00

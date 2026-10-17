@@ -216,9 +216,13 @@ $ w_i + s_i + t^k_(i j) - M (1 - x_(i j k)) <= w_j quad forall (i, j, k) in cal(
 
 $ w_i >= h_i - tau, quad w_i <= h_i + delta_i, quad delta_i <= tau quad forall i in C $
 
-* (8) Jornada.* O corretor não sai de casa antes do início do dia. O que passar do fim regular é hora extra. O dia inteiro não passa do limite legal:
+* (8) Jornada.* O corretor não sai de casa antes do início do dia. O que passar do fim regular é hora extra. O dia inteiro não passa do limite legal, tanto no relógio quanto na soma de serviços e viagens da rota e da frota:
 
 $ w_(d_k) >= E_k, quad w_(f_k) <= L_k + o_k, quad w_(f_k) - w_(d_k) <= J_max quad forall k in K $
+
+$ sum_((i, j) : (i, j, k) in cal(A)) (s_i + t^k_(i j)) thin x_(i j k) <= J_max thin y_k quad forall k in K $
+
+$ sum_(i in C) s_i + sum_((i, j, k) in cal(A)) t^k_(i j) thin x_(i j k) <= sum_(k in K) (J_max - s_(a_k)) thin y_k $
 
 * (9) Almoço.* Quem trabalha passa pelo nó de almoço, e o início fica dentro da janela:
 
@@ -345,13 +349,19 @@ $
 
 * (7) Janelas flexíveis,* as mesmas do M1: no máximo $tau$ minutos antes, atraso limitado por $tau$.
 
-* (8) Limites rígidos do turno.* O turno não sai da origem antes de $E_r$, e a última visita termina até $L_r$:
+* (8) Limites rígidos do turno.* O turno não sai da origem antes de $E_r$, e a última visita termina até $L_r$, tanto no relógio quanto na soma de serviços e viagens até imóveis:
 
 $
 w_(d_r) >= E_r quad forall r in R
 $
 $
 w_i + s_i - M (1 - x_(i f_r r)) <= L_r quad forall i in C, r in R
+$
+$
+sum_((i, j) : (i, j, r) in cal(A)) s_i thin x_(i j r) + sum_((i, j) : (i, j, r) in cal(A), j in C) t^r_(i j) thin x_(i j r) <= L_r - E_r quad forall r in R
+$
+$
+sum_(i in C) s_i + sum_((i, j, r) in cal(A), j in C) t^r_(i j) thin x_(i j r) <= sum_(r in R) (L_r - E_r)
 $
 
 A restrição (8) vale para o fim da última visita. A viagem até o destino entra na distância e em $w_(f_r)$, e pode terminar depois de $L_r$.
@@ -552,7 +562,7 @@ Duas funções da capacidade do CVRP já são feitas pelo tempo. A primeira é q
 
 Os levantamentos de WSRP tratam o tempo do trabalhador como o recurso escasso: regras de jornada, pausas, turnos, habilidades e janelas (Castillo-Salazar, Landa-Silva e Qu, 2016; Paraskevopoulos, Laporte, Repoussis e Tarantilis, 2017). O mesmo vale para o roteamento de cuidado domiciliar (Fikar e Hirsch, 2017; Cissé et al., 2017). Uma carga física aparece quando o trabalhador carrega alguma coisa, como um técnico com ferramentas e peças (Kovacs, Parragh, Doerner e Hartl, 2012). Esse é outro problema.
 
-Vários dos nomes usados no projeto, na definição canônica, incluem capacidade: VRPTW, rotas abertas, múltiplos depósitos, dependência de local e frota mista. A nota registra a omissão no texto, que é a opção usada. Todo modelo é o caso sem capacidade, $Q_k >= n$, e o dia de 12 horas no M1 e os turnos rígidos no M2 são as restrições de recurso da rota. Ficaram de lado um teto opcional de visitas, usar o tempo de serviço como demanda, e tratar assentos no carro do corretor. Levar o cliente entre imóveis seria um problema de coleta e entrega, fora do escopo.
+Vários dos nomes usados no projeto, na definição canônica, incluem capacidade: VRPTW, rotas abertas, múltiplos depósitos, dependência de local e frota mista. A nota registra a omissão no texto, que é a opção usada. Todo modelo é o caso sem capacidade, $Q_k >= n$, e o dia de 12 horas no M1 e os turnos rígidos no M2 são as restrições de recurso da rota. As desigualdades lineares de duração por rota e na frota em (8) expõem a parte aditiva desse limite diretamente em $x$ e $y$, sem depender do Big-M, de modo que o pré-resolvedor rejeita de imediato instâncias cuja soma das durações excede o tempo disponível dos corretores. Ficaram de lado um teto opcional de visitas e tratar assentos no carro do corretor. Levar o cliente entre imóveis seria um problema de coleta e entrega, fora do escopo.
 
 A analogia com a carga para na geração de colunas, onde carga e tempo são o mesmo tipo de objeto: uma quantidade que acumula ao longo da rota e para num limite. O tempo é um recurso menos organizado, e o texto deve dizer isso. A espera por uma janela faz o relógio saltar para a abertura. A carga só soma. O M1 limita um intervalo, da saída de casa ao fim da última visita, não uma soma de demandas. O M2 tem dois limites por corretor, manhã e tarde, em vez de uma capacidade diária única.
 
