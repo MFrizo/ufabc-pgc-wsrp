@@ -300,8 +300,11 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     model.delay_tolerance_constraint = pyo.Constraint(model.C, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
 
     # 5.5 Hard Shift Limits: a shift starts when the broker leaves its origin, not before its
-    # start, and its last visit ends by the end of the shift
-    # Formula: w_dtk >= E_tk, w_i + s_i - M * (1 - x_i,ftk,tk) <= L_tk
+    # start, and its last visit ends by the end of the shift — both on the clock and as the
+    # sum of services and visits' trips
+    # Formula: w_dtk >= E_tk, w_i + s_i - M * (1 - x_i,ftk,tk) <= L_tk,
+    #          sum_{(i,j)} s_i x_ijtk + sum_{(i,j): j in C} t^tk_ij x_ijtk <= L_tk - E_tk,
+    #          sum_{i in C} s_i + sum_{(i,j,tk): j in C} t^tk_ij x_ijtk <= sum_tk (L_tk - E_tk)
     def shift_start_rule(model_instance, r):
         return model_instance.w[model_instance.depot[r]] >= model_instance.shift_start[r]
 
@@ -310,8 +313,23 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
                 - model_instance.big_m * (1 - model_instance.x[i, model_instance.end[r], r])
                 <= model_instance.shift_end[r])
 
+    def shift_duration_rule(model_instance, r):
+        return (sum(model_instance.service[i] * model_instance.x[i, j, r]
+                    for (i, j, route) in model_instance.ARCS if route == r)
+                + sum(model_instance.travel_time[i, j, r] * model_instance.x[i, j, r]
+                      for (i, j, route) in model_instance.ARCS if route == r and j in model_instance.C)
+                <= model_instance.shift_end[r] - model_instance.shift_start[r])
+
+    def fleet_duration_rule(model_instance):
+        return (sum(model_instance.service[i] for i in model_instance.C)
+                + sum(model_instance.travel_time[i, j, r] * model_instance.x[i, j, r]
+                      for (i, j, r) in model_instance.ARCS if j in model_instance.C)
+                <= sum(model_instance.shift_end[r] - model_instance.shift_start[r] for r in model_instance.R))
+
     model.shift_start_constraint = pyo.Constraint(model.R, rule=shift_start_rule, doc="Constraint 5.5 start")
     model.shift_end_constraint = pyo.Constraint(model.C, model.R, rule=shift_end_rule, doc="Constraint 5.5 end")
+    model.shift_duration_constraint = pyo.Constraint(model.R, rule=shift_duration_rule, doc="Constraint 5.5 duration")
+    model.fleet_duration_constraint = pyo.Constraint(rule=fleet_duration_rule, doc="Constraint 5.5 fleet duration")
 
     # 5.6 Workload fairness: a broker's workload is the time he is out on the shifts he
     # actually runs. The objective penalizes the longest such workload. A broker on his
