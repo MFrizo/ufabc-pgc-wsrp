@@ -87,8 +87,9 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
                             f"{data_payload['max_brokers']} (most the solver takes).")
     for listing in data_payload.get('listings', []):
         project_logger.info(f"  node {listing['node']}: {listing['address']}, {listing['district']} "
-                            f"({listing['area']:.0f} m², {listing['type']})")
+                            f"({listing['area']:.0f} m², {data_payload['service_times'][listing['node']]} min, {listing['type']})")
     project_logger.info(f"Dataset loaded. Total nodes: {data_payload['num_nodes']}")
+    project_logger.info(f"Total visit time: {sum(data_payload['service_times'])} min")
 
     # ---------------------------------------------------------
     # PHASE 2: Mathematical Modeling (Pyomo Polyhedron)
