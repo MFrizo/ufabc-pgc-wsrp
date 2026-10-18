@@ -1,7 +1,7 @@
 #set document(
-  title: "Modelos completos M1, M2 e M3",
+  title: "Documentação dos modelos completos M1, M2 e M3",
   author: "UFABC — PGC — WSRP",
-  date: datetime(year: 2026, month: 10, day: 15),
+  date: datetime(year: 2026, month: 10, day: 18),
 )
 #set page(
   paper: "a4",
@@ -9,7 +9,7 @@
   footer: context {
     if counter(page).get().first() == 1 { return }
     set text(size: 8.5pt)
-    [Modelos completos M1, M2 e M3]
+    [Documentação dos modelos completos M1, M2 e M3]
     h(1fr)
     counter(page).display("1")
   },
@@ -31,13 +31,15 @@
   #v(1.6cm)
   #text(size: 20pt, weight: "bold")[Modelos completos do WSRP]
   #v(0.45cm)
-  #text(size: 13pt)[M1, M2 e M3: formulação, gerador, decisões e experimentos no catálogo real de São Paulo]
+  #text(size: 13pt)[M1, M2 e M3: formulação, gerador de instâncias e decisões de modelagem]
   #v(1.4cm)
-  #text(size: 11pt)[15 de outubro de 2026]
+  #text(size: 11pt)[18 de outubro de 2026]
   #v(1fr)
   #text(size: 9.5pt)[
-    Este texto reúne as páginas dos modelos, as notas de decisão e o registro
-    dos experimentos em Google Colab. As formulações seguem o código em `src/models/`.
+    Este texto reúne as páginas dos modelos, as notas de decisão e a documentação do
+    gerador de instâncias. As formulações seguem o código em `src/models/`.
+    Os testes e experimentos computacionais no catálogo real estão documentados
+    no relatório de testes em separado.
   ]
 ]
 
@@ -48,7 +50,7 @@
 
 O problema tratado neste projeto é um _Workforce Scheduling and Routing Problem_ (WSRP): a agência precisa designar corretores a visitas de imóveis e ordenar o dia de cada um. Os modelos M0.0 a M0.6 são subpassos. Cada um acrescenta um recurso, e juntos chegam ao M1, o primeiro modelo completo. O M2 olha o mesmo dia pelo lado do corretor. O M3 guarda o conjunto de planos em que melhorar um lado não piora o outro.
 
-Este documento descreve os três modelos como estão implementados, resume o gerador de instâncias com ênfase no cálculo das distâncias do catálogo real, registra as decisões que estão em `docs/decisions/`, e reproduz os experimentos de entrada compartilhada executados no Google Colab e registrados em `docs/experiments/complete-models.md`.
+Este documento descreve os três modelos como estão implementados, resume o gerador de instâncias com ênfase no cálculo das distâncias do catálogo real e registra as decisões que estão em `docs/decisions/`. Os testes computacionais e experimentos de entrada compartilhada executados no Google Colab estão documentados no relatório complementar de testes (`relatorio-modelos-completos-testes.pdf`) e em `docs/experiments/complete-models.md`.
 
 O tempo é contado em minutos a partir das 8h, de modo que 0 é 8h, 540 é 17h e 600 é 18h. A distância $c_(i j)$ está nas unidades do mapa do gerador, 4 por quilômetro: uma unidade vale 0,25 km. O mesmo mapa de $100 times 100$ unidades, cerca de 25 km de lado, serve às instâncias sintéticas e à projeção dos anúncios reais.
 
@@ -240,7 +242,7 @@ Os pesos de tempo, atraso e hora extra multiplicam minutos. O peso da distância
 
 == M1.a, o mesmo modelo com visitas flexíveis
 
-O M1.a usa a formulação do M1. A única diferença de instância é a parcela de visitas com horário marcado. No código, o padrão é `fixed_ratio = 0.5`: metade das visitas tem início fixo e a outra metade pode começar em qualquer instante que ainda termine dentro do dia. Nos experimentos deste documento, `FIXED_RATIO` foi 0, então nenhuma visita tinha horário marcado. M1, M2 e M3 ignoram esse parâmetro e marcam todas as visitas.
+O M1.a usa a formulação do M1. A única diferença de instância é a parcela de visitas com horário marcado. No código, o padrão é `fixed_ratio = 0.5`: metade das visitas tem início fixo e a outra metade pode começar em qualquer instante que ainda termine dentro do dia. Nos experimentos computacionais, `FIXED_RATIO` foi 0, então nenhuma visita tinha horário marcado. M1, M2 e M3 ignoram esse parâmetro e marcam todas as visitas.
 
 = M2 — ponto de vista do corretor
 
@@ -394,7 +396,7 @@ M1 e M2 não compartilham o conjunto viável, então um par das soluções deles
 
 As regras que permanecem como restrições são as do M1: cada visita atendida uma vez, uma visita já designada feita pelo seu corretor, as janelas flexíveis, o dia de 12 horas e a pausa de almoço. O objetivo da agência é o do M1. O objetivo dos corretores são as regras do M2 que o M1 não impõe: minutos da rota fora dos turnos do próprio corretor, um dia trabalhado na folga, e a viagem extra até o ponto de almoço que ele escolheu.
 
-`main.py --model m3` não devolve um plano. Devolve a frente. Os experimentos registrados mais adiante não chamaram `pareto_front`. Chamaram `build_model_m3` uma vez, com os três corretores autorizados a trabalhar.
+`main.py --model m3` não devolve um plano. Devolve a frente. Os experimentos computacionais registrados no relatório de testes não chamaram `pareto_front`. Chamaram `build_model_m3` uma vez, com os três corretores autorizados a trabalhar.
 
 == Dados que o M1 não lê
 
@@ -584,7 +586,7 @@ O que o texto pode afirmar: uma instância de São Paulo é roteada na rede de d
 
 == Decisões de objetivo
 
-Três decisões de objetivo estão nas páginas dos modelos e valem para ler os experimentos.
+Três decisões de objetivo estão nas páginas dos modelos e valem para interpretar os experimentos.
 
 No M1 a hierarquia é rígida por construção dos pesos. Um corretor a menos vale mais que qualquer combinação de tempo, distância, atraso e hora extra. Entre planos com a mesma frota, um minuto de direção vale mais que a distância inteira. O atraso pesa 10 e a hora extra pesa 100, ambos por minuto, salvo peso informado. A distância não é um custo em reais.
 
@@ -594,182 +596,6 @@ No M3 a troca entre os lados não é uma soma ponderada. Cada tamanho de frota �
 
 O nome dinâmico nos três títulos não significa reotimização dentro do MILP. O modelo resolve o começo do dia. Quem quiser reagir a uma visita que mudou chama o modelo de novo.
 
-= Experimentos no catálogo real
-
-Os números desta seção são os do Google Colab, em 11 e 12 de outubro de 2026, registrados em `docs/experiments/complete-models.md`. O notebook é `notebooks/ufabc-pgc-wsrp.ipynb`. No Colab, um modelo foi concluído em todos os tamanhos e nos dois lugares, e só então `MODEL_VERSION` mudou. As tabelas abaixo estão agrupadas por número de imóveis, para os quatro modelos da mesma amostra ficarem juntos.
-
-== Protocolo
-
-#figure(
-  table(
-    columns: (4.2cm, 1fr),
-    table.header([Entrada], [Valor]),
-    [Conjunto de dados], [`real`, catálogo de aluguéis],
-    [Cidade], [São Paulo],
-    [Lugares, nesta ordem], [Moema e depois a cidade inteira],
-    [Semente], [8],
-    [Frota], [3 corretores, fixa],
-    [Resolvedor], [`gurobi_direct`, folga MIP 0, `raw = False`, limite de 300 s],
-    [M1.a], [`FIXED_RATIO = 0`: nenhuma visita com horário marcado],
-    [Tamanhos], [5, 10, 15, 20, 25, 30, 40 e 50 imóveis],
-  ),
-  caption: [Entrada compartilhada. O modo impresso pelo notebook para `raw = False` é `default`.],
-)
-
-M1, M2 e M3 ignoram `FIXED_RATIO`. Um modelo para no primeiro tamanho em que a geração falha ou a resolução atinge 300 segundos. Os tamanhos maiores daquele modelo, naquele lugar, não foram executados.
-
-Toda resolução registrada usa `raw = False`. As linhas do M3 são uma chamada de `build_model_m3`, com os três corretores autorizados. Elas não chamam `pareto_front`. Esse auxiliar grava `raw = True` no código, então chamá-lo teria quebrado o protocolo. A frente, uma resolução por tamanho de frota, não foi executada. A célula de objetivo é o que o notebook imprime. As rotas ficam de fora.
-
-== Tabela-resumo
-
-#figure(
-  table(
-    columns: (2.5cm, 1.5cm, 4.6cm, 1fr),
-    table.header([Lugar], [Modelo], [Tamanhos com plano ótimo], [Onde a série parou]),
-    [Moema], [M1], [5 a 40 imóveis], [50: não cabe em 3 corretores],
-    [Moema], [M1.a], [5 imóveis], [10: limite de 300 s],
-    [Moema], [M2], [5, 10 e 15 imóveis], [20: não cabe nos turnos],
-    [Moema], [M3], [5 a 40 imóveis], [50: não cabe em 3 corretores],
-    [São Paulo], [M1], [5 a 25 imóveis], [30: não cabe em 3 corretores],
-    [São Paulo], [M1.a], [5 e 10 imóveis], [15: limite de 300 s],
-    [São Paulo], [M2], [5 e 10 imóveis], [15: não cabe nos turnos],
-    [São Paulo], [M3], [5 a 25 imóveis], [30: não cabe em 3 corretores],
-  ),
-  caption: [Alcance de cada modelo com 3 corretores, semente 8 e `raw = False`. M1 e M3 param juntos, no teste das 12 horas. M2 para antes, nos turnos rígidos e com um corretor de folga. M1.a para no relógio.],
-)
-
-O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
-
-#figure(
-  table(
-    columns: (2.3cm, 1.3cm, 1.5cm, 1.7cm, 1.6cm, 1.7cm, 1.8cm, 1fr),
-    table.header([Lugar], [Modelo], [Imóveis], [Tempo (s)], [Corretores], [Atraso], [Extra], [Distância]),
-    [Moema], [M1], [40], [0,9929], [3 de 3], [0], [452], [293,27],
-    [Moema], [M1.a], [5], [0,2264], [2 de 3], [0], [0], [4,24],
-    [Moema], [M2], [15], [0,2445], [2 de 3], [12], [—], [466,18],
-    [Moema], [M3], [40], [0,9598], [3 de 3], [400], [476], [284,52],
-    [São Paulo], [M1], [25], [0,2682], [3 de 3], [0], [247], [690,63],
-    [São Paulo], [M1.a], [10], [243,0094], [2 de 3], [0], [0], [146,09],
-    [São Paulo], [M2], [10], [0,1239], [2 de 3], [4], [—], [756,97],
-    [São Paulo], [M3], [25], [0,5187], [3 de 3], [250], [276], [739,78],
-  ),
-  caption: [Maior instância ótima de cada série. Atraso e hora extra em minutos. Distância em unidades do mapa (4 por km). O M2 não imprime hora extra. O M3 é uma resolução, não a frente.],
-)
-
-== Moema em detalhe
-
-Três corretores, semente 8, solver no modo `default`. Uma linha em branco no registro original aparece aqui como não executada: o modelo já tinha parado num tamanho menor.
-
-#figure(
-  table(
-    columns: (1.15cm, 1.15cm, 3.5cm, 1.7cm, 1.55cm, 1.35cm, 1.35cm, 1fr),
-    align: (center, center, left, right, center, right, right, right),
-    table.header([Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
-    [5], [M1], [ótimo], [0,0830], [2 de 3], [0], [40], [84,45],
-    [5], [M1.a], [ótimo], [0,2264], [2 de 3], [0], [0], [4,24],
-    [5], [M2], [ótimo], [0,1279], [2 de 3], [0], [—], [312,95],
-    [5], [M3], [1 resolução], [0,1005], [3 de 3], [50], [60], [70,72],
-    [10], [M1], [ótimo], [0,3673], [3 de 3], [0], [10], [151,60],
-    [10], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
-    [10], [M2], [ótimo], [0,1449], [2 de 3], [5], [—], [455,22],
-    [10], [M3], [1 resolução], [0,1850], [3 de 3], [100], [60], [160,23],
-    [15], [M1], [ótimo], [0,2622], [3 de 3], [0], [42], [184,02],
-    [15], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [15], [M2], [ótimo], [0,2445], [2 de 3], [12], [—], [466,18],
-    [15], [M3], [1 resolução], [0,2446], [3 de 3], [150], [73], [196,95],
-    [20], [M1], [ótimo], [0,2952], [3 de 3], [0], [25], [191,55],
-    [20], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [20], [M2], [não cabe nos turnos], [—], [—], [—], [—], [—],
-    [20], [M3], [1 resolução], [0,2473], [3 de 3], [200], [93], [208,32],
-    [25], [M1], [ótimo], [0,4169], [3 de 3], [0], [57], [211,81],
-    [25], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [25], [M2], [não executado], [—], [—], [—], [—], [—],
-    [25], [M3], [1 resolução], [0,3551], [3 de 3], [250], [137], [224,79],
-    [30], [M1], [ótimo], [0,7027], [3 de 3], [8], [169], [247,67],
-    [30], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [30], [M2], [não executado], [—], [—], [—], [—], [—],
-    [30], [M3], [1 resolução], [0,4233], [3 de 3], [300], [171], [255,43],
-    [40], [M1], [ótimo], [0,9929], [3 de 3], [0], [452], [293,27],
-    [40], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [40], [M2], [não executado], [—], [—], [—], [—], [—],
-    [40], [M3], [1 resolução], [0,9598], [3 de 3], [400], [476], [284,52],
-    [50], [M1], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
-    [50], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [50], [M2], [não executado], [—], [—], [—], [—], [—],
-    [50], [M3], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
-  ),
-  caption: [Moema. Atraso e hora extra em minutos. Distância em unidades do mapa. Os tempos do M1 em 5 e 10 imóveis e do M2 em 5 imóveis são os da segunda execução; o plano impresso foi o mesmo da primeira.],
-)
-
-== São Paulo em detalhe
-
-A cidade inteira, sem bairro. A amostra é de 6.874 anúncios. O resto do protocolo é o de Moema.
-
-#figure(
-  table(
-    columns: (1.15cm, 1.15cm, 3.5cm, 1.7cm, 1.55cm, 1.35cm, 1.35cm, 1fr),
-    align: (center, center, left, right, center, right, right, right),
-    table.header([Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
-    [5], [M1], [ótimo], [0,0548], [2 de 3], [0], [50], [144,91],
-    [5], [M1.a], [ótimo], [0,2191], [2 de 3], [0], [0], [85,04],
-    [5], [M2], [ótimo], [0,0979], [2 de 3], [0], [—], [513,15],
-    [5], [M3], [1 resolução], [0,1159], [2 de 3], [50], [72], [144,91],
-    [10], [M1], [ótimo], [0,0956], [3 de 3], [0], [33], [242,04],
-    [10], [M1.a], [ótimo], [243,0094], [2 de 3], [0], [0], [146,09],
-    [10], [M2], [ótimo], [0,1239], [2 de 3], [4], [—], [756,97],
-    [10], [M3], [1 resolução], [0,1282], [3 de 3], [100], [101], [258,25],
-    [15], [M1], [ótimo], [0,1814], [3 de 3], [0], [45], [356,76],
-    [15], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
-    [15], [M2], [não cabe nos turnos], [—], [—], [—], [—], [—],
-    [15], [M3], [1 resolução], [0,2131], [3 de 3], [150], [75], [407,13],
-    [20], [M1], [ótimo], [0,1740], [3 de 3], [0], [63], [697,40],
-    [20], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [20], [M2], [não executado], [—], [—], [—], [—], [—],
-    [20], [M3], [1 resolução], [0,3193], [3 de 3], [200], [107], [701,27],
-    [25], [M1], [ótimo], [0,2682], [3 de 3], [0], [247], [690,63],
-    [25], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [25], [M2], [não executado], [—], [—], [—], [—], [—],
-    [25], [M3], [1 resolução], [0,5187], [3 de 3], [250], [276], [739,78],
-    [30], [M1], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
-    [30], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [30], [M2], [não executado], [—], [—], [—], [—], [—],
-    [30], [M3], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
-    [40], [M1], [não executado], [—], [—], [—], [—], [—],
-    [40], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [40], [M2], [não executado], [—], [—], [—], [—], [—],
-    [40], [M3], [não executado], [—], [—], [—], [—], [—],
-    [50], [M1], [não executado], [—], [—], [—], [—], [—],
-    [50], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [50], [M2], [não executado], [—], [—], [—], [—], [—],
-    [50], [M3], [não executado], [—], [—], [—], [—], [—],
-  ),
-  caption: [São Paulo, sem bairro. Atraso e hora extra em minutos. Distância em unidades do mapa.],
-)
-
-== Teste de estresse
-
-Depois da escada de 3 corretores, a frota passa a crescer com os imóveis. Um erro de encaixe significa que a agenda oculta passa de 12 horas, então a tentativa seguinte mantém os imóveis e aumenta os corretores. A tabela ainda tem um único ponto. O lugar dessa execução não foi registrado.
-
-#figure(
-  table(
-    columns: (2.4cm, 2.2cm, 2cm, 2.2cm, 1fr),
-    table.header([Lugar], [Imóveis], [Modelo], [Corretores], [Status]),
-    [não registrado], [200], [M3], [16], [não cabe no dia de trabalho mais longo],
-  ),
-  caption: [Primeiro ponto do teste de estresse. Semente 8, `raw = False`. O restante da sequência ainda não foi preenchido.],
-)
-
-== Como ler os números
-
-M1 e M3 compartilham o teste das 12 horas, por isso param no mesmo tamanho: 40 imóveis ainda cabem em Moema e 50 não cabem; na cidade, 25 cabem e 30 não cabem. O M2 para antes porque os turnos são rígidos e um corretor está de folga. O M1.a, sem nenhuma visita marcada, não falha na geração. Em Moema ele resolve 5 imóveis e atinge o limite de tempo em 10. Na cidade resolve 5 e 10, este em 243,0094 s, e atinge o limite em 15.
-
-O atraso impresso do M3, nos dois lugares, é 10 minutos vezes o número de imóveis: 50, 100, 150, e assim por diante, até 400 em 40 imóveis. A resolução única minimiza $f_2$, o custo dos corretores em minutos fora dos turnos, na folga e na viagem extra de almoço. O atraso da agência não entra nesse objetivo, e a tolerância permite até 10 minutos por visita. O notebook ainda imprime atraso, hora extra e distância, porque o impressor é o das rotas abertas do M1. Esses três números não são $f_2$, e $f_2$ não foi impresso. A hora extra impressa também não é o objetivo da resolução.
-
-A distância do M2 fica acima da do M1 no mesmo tamanho. O M2 paga a viagem até o destino de cada turno, a casa ou o ponto de almoço, e os horários marcados são outros, porque a agenda foi encaixada nos turnos. A distância do M1 não conta a volta para casa nem as pernas virtuais do almoço.
-
-No M1.a com nenhuma visita marcada, a hora extra impressa é zero nos três casos ótimos, e a distância cai em relação ao M1 da mesma amostra: 4,24 contra 84,45 em cinco imóveis de Moema, e 85,04 contra 144,91 em cinco imóveis na cidade. Sem horário marcado, o modelo pode reordenar as visitas. A comparação de distância com o M1 continua sendo desempate de planos que já empataram em tempo, não um custo em reais.
-
-Reexecutar o mesmo tamanho de M1 e de M2 em Moema manteve o plano impresso e mudou só o tempo de parede. A tabela guarda o tempo da última execução.
 
 = Referências citadas nas notas
 
