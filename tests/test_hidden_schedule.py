@@ -46,6 +46,33 @@ class HiddenScheduleTest(unittest.TestCase):
         self.assertFalse(off['hidden_schedule'])
         self.assertNotEqual(on['earliest_start'], off['earliest_start'])
 
+    def test_duration_constraints_prove_overfull_fleet_infeasible_in_presolve(self):
+        import pyomo.environ as pyo
+
+        for variant, per_route_attr in [
+            ('m1', 'route_duration_constraint'),
+            ('m1.a', 'route_duration_constraint'),
+            ('m2', 'shift_duration_constraint'),
+            ('m3', 'route_duration_constraint'),
+        ]:
+            with self.subTest(model=variant):
+                settings = dict(INSTANCE_SETTINGS[variant])
+                settings.update(num_brokers=2, hidden_schedule=False)
+                data = generate_wsrp_instance(num_properties=12, random_seed=1, **settings)
+                for i in range(1, 13):
+                    data['service_times'][i] = 120.0
+
+                model = BUILDERS[variant](data)
+                self.assertTrue(hasattr(model, per_route_attr))
+                self.assertTrue(hasattr(model, 'fleet_duration_constraint'))
+
+                solver = pyo.SolverFactory('gurobi_direct')
+                result = solver.solve(model, tee=False)
+                self.assertEqual(str(result.solver.termination_condition), 'infeasible')
+                self.assertEqual(solver._solver_model.IterCount, 0.0)
+                self.assertEqual(solver._solver_model.NodeCount, 0.0)
+
 
 if __name__ == '__main__':
     unittest.main()
+
