@@ -14,6 +14,7 @@ Usage:
     python main.py --model m0.6    # Sub-step: FSMVRPTW
     python main.py --model m1      # Moema, 5 houses, 3 brokers, seed 8, gap 0, 30 min
     python main.py --model m1.a    # Same instance; the booked share stays the model's own
+    python main.py --model m1.b    # Tightened and lifted MTZ reformulation of m1 / m1.a
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
     python main.py --model m3      # Pareto front of the agency and the brokers
 

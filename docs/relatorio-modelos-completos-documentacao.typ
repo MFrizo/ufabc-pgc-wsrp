@@ -244,6 +244,34 @@ Os pesos de tempo, atraso e hora extra multiplicam minutos. O peso da distância
 
 O M1.a usa a formulação do M1. A única diferença de instância é a parcela de visitas com horário marcado. No código, o padrão é `fixed_ratio = 0.5`: metade das visitas tem início fixo e a outra metade pode começar em qualquer instante que ainda termine dentro do dia. Nos experimentos computacionais, `FIXED_RATIO` foi 0, então nenhuma visita tinha horário marcado. M1, M2 e M3 ignoram esse parâmetro e marcam todas as visitas.
 
+== M1.b, reformulação sem Big-M global
+
+O M1.b (`build_model_m1_b`, em `src/models/model_1_b.py`) mantém o conjunto viável e o objetivo do M1.a (e do M1 quando `fixed_ratio = 1`), mas substitui a constante global $M$ da restrição (6) por três fortalecimentos da relaxação linear:
+
+1. *Pré-processamento das janelas $[a_i, b_i]$ (redução de domínio)* por propagação iterativa de alcançabilidade para frente e para trás até convergir:
+
+$ a_j <- max(a_j, min_((i, j, k) in cal(A)_"ativo") (a_i + s_i + t^k_(i j))), quad b_i <- min(b_i, max_((i, j, k) in cal(A)_"ativo") (b_j - s_i - t^k_(i j))) $
+
+Todo arco com $a_i + s_i + t^k_(i j) > b_j$ é fixado em $x_(i j k) = 0$.
+
+2. *Coeficientes $M^k_(i j)$ por arco e agregação entre corretores:*
+
+$ M^k_(i j) = max(0, b_i + s_i + t^k_(i j) - a_j) $
+
+Para pares de imóveis $(i, j) in C times C$ ($i != j$), como no máximo um corretor percorre $(i, j)$, as $|K|$ linhas por corretor são substituídas por uma única desigualdade agregada:
+
+$ w_i - w_j + sum_(k in K) M^k_(i j) thin x_(i j k) <= b_i - a_j quad forall i, j in C, i != j $
+
+3. *Limites de janela levantados de Desrochers e Laporte (1991) e eliminação de 2-ciclos:*
+
+$ w_i >= a_i + sum_((j, i, k) in cal(A)) max(0, a_j + s_j + t^k_(j i) - a_i) thin x_(j i k) quad forall i in C union A $
+
+$ w_i <= b_i - sum_((i, j, k) in cal(A)) max(0, b_i - (b_j - s_i - t^k_(i j))) thin x_(i j k) quad forall i in C union A $
+
+$ sum_(k in K) (x_(i j k) + x_(j i k)) <= 1 quad forall i, j in C, i < j $
+
+O termo reverso $(b_i - a_j - s_j - t^k_(j i)) thin x_(j i k)$ da equação (11) de Desrochers e Laporte (1991) não é somado diretamente em $w_i - w_j <= b_i - a_j$: como demonstraram Yuan, Cattaruzza, Ogier e Semet (2020), quando $x_(j i k) = 1$ esse coeficiente força $w_i <= w_j + s_j + t^k_(j i)$, proibindo espera no nó $i$.
+
 = M2 — ponto de vista do corretor
 
 O M2 é o HC-DOMDVRPTW-SD: a mesma família de roteamento do M1, com a jornada do corretor no centro do modelo. O construtor é `build_model_m2`, em `src/models/model_2.py`.
@@ -599,7 +627,7 @@ O nome dinâmico nos três títulos não significa reotimização dentro do MILP
 
 = Referências citadas nas notas
 
-As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m2.md` e `m3.md`. As que este texto nomeia são:
+As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.b.md`, `m2.md` e `m3.md`. As que este texto nomeia são:
 
 - Ballou, Rahardja e Sakai (2002), fatores de circuidade.
 - Bektaş e Laporte (2011), problema de roteamento com poluição.
@@ -609,6 +637,7 @@ As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `doc
 - Braekers, Hartl, Parragh e Tricoire (2016), frente entre custo e incômodo no cuidado domiciliar.
 - Castillo-Salazar, Landa-Silva e Qu (2016), levantamento de WSRP.
 - Cissé et al. (2017) e Fikar e Hirsch (2017), roteamento de cuidado domiciliar.
+- Desrochers e Laporte (1991), fortalecimento (lifting) das restrições MTZ e janelas de tempo.
 - Ichoua, Gendreau e Potvin (2003), tempos de viagem que preservam FIFO.
 - Jozefowiez, Semet e Talbi (2008), roteamento multiobjetivo.
 - Kovacs, Parragh, Doerner e Hartl (2012), técnico com carga.
@@ -620,5 +649,6 @@ As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `doc
 - Paraskevopoulos, Laporte, Repoussis e Tarantilis (2017), roteamento restrito por recurso.
 - Taş, Dellaert, van Woensel e de Kok (2013), tempo de viagem estocástico.
 - TomTom Traffic Index 2025, relatório de São Paulo.
+- Yuan, Cattaruzza, Ogier e Semet (2020), nota sobre a validade das restrições MTZ levantadas com espera.
 
 Preço do etanol: média ANP da cidade de São Paulo, semana de 4 a 10 de outubro de 2026. Consumo: tabela PBEV do Inmetro, 14 de agosto de 2026, Volkswagen Polo 1.0 MPI, ciclo urbano, etanol.

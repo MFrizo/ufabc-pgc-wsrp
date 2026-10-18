@@ -52,6 +52,7 @@ class HiddenScheduleTest(unittest.TestCase):
         for variant, per_route_attr in [
             ('m1', 'route_duration_constraint'),
             ('m1.a', 'route_duration_constraint'),
+            ('m1.b', 'route_duration_constraint'),
             ('m2', 'shift_duration_constraint'),
             ('m3', 'route_duration_constraint'),
         ]:

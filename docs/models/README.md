@@ -2,7 +2,7 @@
 
 M0.0 to M0.6 are sub-steps. Each one adds one feature, and together they lead to M1, the first complete model: brokers leave home, routes are open, and the day has a lunch break, soft time windows, overtime and a 12-hour limit.
 
-M1.a is a subcase of M1 in which only a share of the visits are booked. M2 is the broker-focused model: each broker works his own morning and afternoon shift. M3 is the Pareto front between the agency's objective and the brokers' objective, on M1's feasible set.
+M1.a is a subcase of M1 in which only a share of the visits are booked. M1.b is a reformulation of M1 and M1.a that replaces the single global Big-M constant with time-window preprocessing, arc-specific $M^k_{ij}$ coefficients, and Desrochers–Laporte lifted time-window bounds. M2 is the broker-focused model: each broker works his own morning and afternoon shift. M3 is the Pareto front between the agency's objective and the brokers' objective, on M1's feasible set.
 
 Each page lists the sets, parameters, decision variables, objective function and constraints of the model as implemented in `src/models/`, and ends with the complete formulation.
 
@@ -17,6 +17,7 @@ Each page lists the sets, parameters, decision variables, objective function and
 | [M0.6](m0.6.md) | sub-step | FSMVRPTW | M0.5 | Fleet minimization | Brokers, then time out of the agency |
 | [M1](m1.md) | first complete model | MO-DOMDVRPTW-SD | M0.4–M0.6 | Brokers start at home, open routes, lunch break, soft windows, overtime, 12-hour days | Brokers, then travel time, delay and overtime |
 | [M1.a](m1.a.md) | subcase of M1 | MO-DOMDVRPTW-SD with flexible visits | M1 | Only a share of the visits booked; the others may start at any time of the day | Brokers, then travel time, delay and overtime |
+| [M1.b](m1.b.md) | tightened MTZ reformulation | MO-DOMDVRPTW-SD with lifted MTZ | M1, M1.a | Time-window preprocessing, arc-specific $M^k_{ij}$, broker-lifted propagation and Desrochers–Laporte bounds | Brokers, then travel time, delay and overtime |
 | [M2](m2.md) | broker-focused model | HC-DOMDVRPTW-SD | M1 | A morning and an afternoon shift per broker, lunch spot, days off, hard shift ends | Fuel, then delay and the longest day |
 | [M3](m3.md) | Pareto front | — | M1 | M1's routes, with the brokers' shifts and days off scored instead of enforced | One plan per fleet size: brokers' cost subject to at most $m$ brokers |
 
