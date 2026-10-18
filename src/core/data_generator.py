@@ -12,6 +12,7 @@ import numpy as np
 from typing import Any, Optional, Union
 
 from src.core.travel import congestion_factors, detour_factor, travel_minutes
+from src.utils.logger import project_logger
 
 # Random stream of each feature. The graph uses the plain seed; every other feature
 # uses default_rng([random_seed, stream]), so its draws never shift the graph's.
@@ -55,7 +56,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
                            max_routing_arcs: int = MAX_ROUTING_ARCS,
                            areas: Optional[list[float]] = None,
                            home_region: Optional[list[list[float]]] = None,
-                           hidden_schedule: bool = True) -> dict[str, Any]:
+                           hidden_schedule: bool = True,
+                           raise_on_fit_failure: bool = False) -> dict[str, Any]:
     """
     Generates a synthetic WSRP instance with the data of every model.
 
@@ -144,6 +146,7 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
             'split_shifts': split_shifts, 'lunch_break': lunch_break, 'max_day_length': max_day_length,
             'graph': graph, 'areas': areas, 'home_region': home_region,
             'hidden_schedule': hidden_schedule,
+            'raise_on_fit_failure': raise_on_fit_failure,
         })
 
     num_nodes = num_properties + 1
@@ -188,7 +191,8 @@ def generate_wsrp_instance(num_properties: int = 5, random_seed: int = 42, num_b
         time_windows = _generate_time_windows(num_nodes, random_seed, num_brokers, leg_times, first_legs,
                                               data_payload['service_times'], horizon, fixed_ratio,
                                               data_payload['shifts'] if split_shifts else None, lunch_legs,
-                                              lunch_break, max_day_length)
+                                              lunch_break, max_day_length,
+                                              raise_on_fit_failure=raise_on_fit_failure)
     else:
         # No reference day and no fit check: booked starts are independent, and a set the
         # visits cannot pack is the solver's to reject.
@@ -241,7 +245,9 @@ def _auto_fleet_instance(num_properties: int, random_seed: int, max_routing_arcs
                                                num_brokers=brokers, **settings)
         except ValueError:
             continue
-        if settings['split_shifts'] or candidate['latest_start'][0] <= _day_length(settings):
+        fits_shifts = not candidate.get('schedule_overflow', False)
+        fits_day = candidate['latest_start'][0] <= _day_length(settings)
+        if (settings['split_shifts'] and fits_shifts) or (not settings['split_shifts'] and fits_day):
             schedule = candidate
             break
     if schedule is None:
@@ -644,7 +650,8 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
                            shifts: Optional[list[list[tuple[int, int]]]] = None,
                            lunch_legs: Optional[list[list[int]]] = None,
                            lunch_break: Optional[tuple[int, int, int]] = None,
-                           max_day_length: Optional[int] = None) -> dict[str, Any]:
+                           max_day_length: Optional[int] = None,
+                           raise_on_fit_failure: bool = False) -> dict[str, Any]:
     """
     Builds the time windows around a hidden reference schedule, which guarantees the
     instance is feasible. A share of the visits gets a fixed start time (e_i = l_i),
@@ -690,6 +697,7 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
 
     reference_start = [0] * num_nodes
     reference_broker = [0] * num_nodes
+    schedule_overflow = False
 
     if shifts is None:
         broker_shares = list(zip(working_brokers, np.array_split(reference_order, len(working_brokers))))
@@ -738,8 +746,12 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
 
         # Every broker of the hidden schedule leaves at the start of the day and ends by the horizon
         if max_day_length is not None and horizon > max_day_length:
-            raise ValueError("Some broker's visits don't fit in the longest working day; "
-                             "use more brokers or fewer properties.")
+            schedule_overflow = True
+            if raise_on_fit_failure:
+                raise ValueError("Some broker's visits don't fit in the longest working day; "
+                                 "use more brokers or fewer properties.")
+            project_logger.info("Some broker's visits exceed the longest working day; "
+                                "the solver may prove the instance infeasible.")
     else:
         horizon = max(horizon, max(end for broker_shifts in shifts for _, end in broker_shifts))
 
@@ -763,7 +775,18 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
             _place_visits(rng, share, first_leg, leg_times, service_times, shift_start, shift_end, reference_start)
 
         if remaining:
-            raise ValueError("The visits don't fit in the brokers' shifts; use more brokers or fewer properties.")
+            schedule_overflow = True
+            if raise_on_fit_failure:
+                raise ValueError("The visits don't fit in the brokers' shifts; use more brokers or fewer properties.")
+            project_logger.info("The visits don't fit in the brokers' shifts; "
+                                "the solver may prove the instance infeasible.")
+            current_time = horizon
+            for i, node in enumerate(remaining):
+                broker = working_brokers[i % len(working_brokers)]
+                reference_broker[node] = broker
+                reference_start[node] = current_time
+                current_time += service_times[node] + 15
+            horizon = max(horizon, current_time)
 
     # 3. Time Windows
     # The depot (node 0) may be left at any time of the day
@@ -786,7 +809,8 @@ def _generate_time_windows(num_nodes: int, random_seed: int, num_brokers: int, l
         'earliest_start': earliest_start,
         'latest_start': latest_start,
         'fixed_visits': fixed_visits,
-        'reference_broker': reference_broker
+        'reference_broker': reference_broker,
+        'schedule_overflow': schedule_overflow,
     }
 
 

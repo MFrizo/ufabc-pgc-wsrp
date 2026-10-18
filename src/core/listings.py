@@ -39,7 +39,8 @@ MAP_CENTER = (50.0, 50.0)
 def load_instance(dataset: str, model_version: str, num_properties: int = 5, random_seed: int = 42,
                   num_brokers: Optional[Union[int, str]] = None, city: Optional[str] = None,
                   neighborhood: Optional[str] = None, fixed_ratio: Optional[float] = None,
-                  hidden_schedule: Optional[bool] = None) -> dict[str, Any]:
+                  hidden_schedule: Optional[bool] = None,
+                  raise_on_fit_failure: Optional[bool] = None) -> dict[str, Any]:
     """
     Builds the instance a model runs on, either from the generator or from the real catalog.
 
@@ -92,6 +93,8 @@ def load_instance(dataset: str, model_version: str, num_properties: int = 5, ran
         instance_settings['fixed_ratio'] = fixed_ratio
     if hidden_schedule is not None:
         instance_settings['hidden_schedule'] = hidden_schedule
+    if raise_on_fit_failure is not None:
+        instance_settings['raise_on_fit_failure'] = raise_on_fit_failure
     if instance_settings.get('hidden_schedule', True) is False:
         project_logger.info("Hidden schedule is off; booked starts are drawn on their own "
                             "and the solver may prove the instance infeasible.")
