@@ -93,16 +93,16 @@ Toda resolução registrada usa `raw = False`. As linhas do M3 são uma chamada 
   table(
     columns: (2.5cm, 1.5cm, 4.6cm, 1fr),
     table.header([Lugar], [Modelo], [Tamanhos com plano ótimo], [Onde a série parou]),
-    [Moema], [M1], [5 a 40 imóveis], [50: não cabe em 3 corretores],
-    [Moema], [M1.a], [5 imóveis], [10: limite de 300 s],
-    [Moema], [M2], [5, 10 e 15 imóveis], [20: não cabe nos turnos],
-    [Moema], [M3], [5 a 40 imóveis], [50: não cabe em 3 corretores],
-    [São Paulo], [M1], [5 a 25 imóveis], [30: não cabe em 3 corretores],
-    [São Paulo], [M1.a], [5 e 10 imóveis], [15: limite de 300 s],
-    [São Paulo], [M2], [5 e 10 imóveis], [15: não cabe nos turnos],
-    [São Paulo], [M3], [5 a 25 imóveis], [30: não cabe em 3 corretores],
+    [Moema], [M1], [5 a 40 imóveis], [50: inviável (presolve)],
+    [Moema], [M1.a], [5, 10 e 15 imóveis], [20: limite de 300 s],
+    [Moema], [M2], [5, 10 e 15 imóveis], [20: inviável (presolve)],
+    [Moema], [M3], [5 a 40 imóveis], [50: inviável (presolve)],
+    [São Paulo], [M1], [5 a 25 imóveis], [30: inviável (presolve)],
+    [São Paulo], [M1.a], [5, 10, 15 e 20 imóveis], [25: limite de 300 s],
+    [São Paulo], [M2], [5 e 10 imóveis], [15: inviável (presolve)],
+    [São Paulo], [M3], [5 a 25 imóveis], [30: inviável (presolve)],
   ),
-  caption: [Alcance de cada modelo com 3 corretores, semente 8 e `raw = False`. M1 e M3 param juntos, no teste das 12 horas. M2 para antes, nos turnos rígidos e com um corretor de folga. M1.a para no relógio.],
+  caption: [Alcance de cada modelo com 3 corretores, semente 8 e `raw = False`. M1 e M3 param juntos por inviabilidade matemática de duração da frota no pré-resolvedor. M2 para antes, nos turnos rígidos com um corretor de folga. M1.a alcança 15 imóveis em Moema e 20 na capital com as restrições de duração de frota, parando no limite de tempo.],
 )
 
 O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
@@ -112,11 +112,11 @@ O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
     columns: (2.3cm, 1.3cm, 1.5cm, 1.7cm, 1.6cm, 1.7cm, 1.8cm, 1fr),
     table.header([Lugar], [Modelo], [Imóveis], [Tempo (s)], [Corretores], [Atraso], [Extra], [Distância]),
     [Moema], [M1], [40], [0,9929], [3 de 3], [0], [452], [293,27],
-    [Moema], [M1.a], [5], [0,2264], [2 de 3], [0], [0], [4,24],
+    [Moema], [M1.a], [15], [0,4179], [3 de 3], [0], [0], [25,06],
     [Moema], [M2], [15], [0,2445], [2 de 3], [12], [—], [466,18],
     [Moema], [M3], [40], [0,9598], [3 de 3], [400], [476], [284,52],
     [São Paulo], [M1], [25], [0,2682], [3 de 3], [0], [247], [690,63],
-    [São Paulo], [M1.a], [10], [243,0094], [2 de 3], [0], [0], [146,09],
+    [São Paulo], [M1.a], [20], [0,8166], [3 de 3], [0], [0], [262,03],
     [São Paulo], [M2], [10], [0,1239], [2 de 3], [4], [—], [756,97],
     [São Paulo], [M3], [25], [0,5187], [3 de 3], [250], [276], [739,78],
   ),
@@ -125,7 +125,7 @@ O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
 
 = Resultados detalhados em Moema
 
-Três corretores, semente 8, solver no modo `default`. Uma linha em branco no registro original aparece aqui como não executada: o modelo já tinha parado num tamanho menor.
+Três corretores, semente 8, solver no modo `default`. Uma linha em branco no registro original aparece aqui como não executada: o modelo já tinha parado num tamanho menor. Instâncias cuja carga horária excede os limites de turno ou jornada máxima são encaminhadas ao solver, sendo comprovadas matematicamente inviáveis pelo pré-resolvedor (presolve) do Gurobi em fração de segundo (0 nós explorados).
 
 #figure(
   table(
@@ -137,16 +137,16 @@ Três corretores, semente 8, solver no modo `default`. Uma linha em branco no re
     [5], [M2], [ótimo], [0,1279], [2 de 3], [0], [—], [312,95],
     [5], [M3], [1 resolução], [0,1005], [3 de 3], [50], [60], [70,72],
     [10], [M1], [ótimo], [0,3673], [3 de 3], [0], [10], [151,60],
-    [10], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
+    [10], [M1.a], [ótimo], [0,2693], [2 de 3], [0], [0], [16,06],
     [10], [M2], [ótimo], [0,1449], [2 de 3], [5], [—], [455,22],
     [10], [M3], [1 resolução], [0,1850], [3 de 3], [100], [60], [160,23],
     [15], [M1], [ótimo], [0,2622], [3 de 3], [0], [42], [184,02],
-    [15], [M1.a], [não executado], [—], [—], [—], [—], [—],
+    [15], [M1.a], [ótimo], [0,4179], [3 de 3], [0], [0], [25,06],
     [15], [M2], [ótimo], [0,2445], [2 de 3], [12], [—], [466,18],
     [15], [M3], [1 resolução], [0,2446], [3 de 3], [150], [73], [196,95],
     [20], [M1], [ótimo], [0,2952], [3 de 3], [0], [25], [191,55],
-    [20], [M1.a], [não executado], [—], [—], [—], [—], [—],
-    [20], [M2], [não cabe nos turnos], [—], [—], [—], [—], [—],
+    [20], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
+    [20], [M2], [inviável (presolve)], [0,1569], [—], [—], [—], [—],
     [20], [M3], [1 resolução], [0,2473], [3 de 3], [200], [93], [208,32],
     [25], [M1], [ótimo], [0,4169], [3 de 3], [0], [57], [211,81],
     [25], [M1.a], [não executado], [—], [—], [—], [—], [—],
@@ -160,12 +160,12 @@ Três corretores, semente 8, solver no modo `default`. Uma linha em branco no re
     [40], [M1.a], [não executado], [—], [—], [—], [—], [—],
     [40], [M2], [não executado], [—], [—], [—], [—], [—],
     [40], [M3], [1 resolução], [0,9598], [3 de 3], [400], [476], [284,52],
-    [50], [M1], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
+    [50], [M1], [inviável (presolve)], [0,8118], [—], [—], [—], [—],
     [50], [M1.a], [não executado], [—], [—], [—], [—], [—],
     [50], [M2], [não executado], [—], [—], [—], [—], [—],
-    [50], [M3], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
+    [50], [M3], [inviável (presolve)], [0,9181], [—], [—], [—], [—],
   ),
-  caption: [Moema. Atraso e hora extra em minutos. Distância em unidades do mapa. Os tempos do M1 em 5 e 10 imóveis e do M2 em 5 imóveis são os da segunda execução; o plano impresso foi o mesmo da primeira.],
+  caption: [Moema. Atraso e hora extra em minutos. Distância em unidades do mapa. As instâncias que extrapolam a capacidade são resolvidas pelo presolve sem necessidade de interrupção na geração.],
 )
 
 = Resultados detalhados em São Paulo (cidade inteira)
@@ -182,25 +182,25 @@ A cidade inteira, sem bairro. A amostra é de 6.874 anúncios. O resto do protoc
     [5], [M2], [ótimo], [0,0979], [2 de 3], [0], [—], [513,15],
     [5], [M3], [1 resolução], [0,1159], [2 de 3], [50], [72], [144,91],
     [10], [M1], [ótimo], [0,0956], [3 de 3], [0], [33], [242,04],
-    [10], [M1.a], [ótimo], [243,0094], [2 de 3], [0], [0], [146,09],
+    [10], [M1.a], [ótimo], [0,2465], [2 de 3], [0], [0], [146,09],
     [10], [M2], [ótimo], [0,1239], [2 de 3], [4], [—], [756,97],
     [10], [M3], [1 resolução], [0,1282], [3 de 3], [100], [101], [258,25],
     [15], [M1], [ótimo], [0,1814], [3 de 3], [0], [45], [356,76],
-    [15], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
-    [15], [M2], [não cabe nos turnos], [—], [—], [—], [—], [—],
+    [15], [M1.a], [ótimo], [0,3960], [3 de 3], [0], [0], [154,93],
+    [15], [M2], [inviável (presolve)], [0,0866], [—], [—], [—], [—],
     [15], [M3], [1 resolução], [0,2131], [3 de 3], [150], [75], [407,13],
     [20], [M1], [ótimo], [0,1740], [3 de 3], [0], [63], [697,40],
-    [20], [M1.a], [não executado], [—], [—], [—], [—], [—],
+    [20], [M1.a], [ótimo], [0,8166], [3 de 3], [0], [0], [262,03],
     [20], [M2], [não executado], [—], [—], [—], [—], [—],
     [20], [M3], [1 resolução], [0,3193], [3 de 3], [200], [107], [701,27],
     [25], [M1], [ótimo], [0,2682], [3 de 3], [0], [247], [690,63],
-    [25], [M1.a], [não executado], [—], [—], [—], [—], [—],
+    [25], [M1.a], [limite de 300 s], [—], [—], [—], [—], [—],
     [25], [M2], [não executado], [—], [—], [—], [—], [—],
     [25], [M3], [1 resolução], [0,5187], [3 de 3], [250], [276], [739,78],
-    [30], [M1], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
+    [30], [M1], [inviável (presolve)], [0,3524], [—], [—], [—], [—],
     [30], [M1.a], [não executado], [—], [—], [—], [—], [—],
     [30], [M2], [não executado], [—], [—], [—], [—], [—],
-    [30], [M3], [não cabe em 3 corretores], [—], [—], [—], [—], [—],
+    [30], [M3], [inviável (presolve)], [0,3695], [—], [—], [—], [—],
     [40], [M1], [não executado], [—], [—], [—], [—], [—],
     [40], [M1.a], [não executado], [—], [—], [—], [—], [—],
     [40], [M2], [não executado], [—], [—], [—], [—], [—],
@@ -215,36 +215,36 @@ A cidade inteira, sem bairro. A amostra é de 6.874 anúncios. O resto do protoc
 
 = Testes de estresse
 
-Depois da escada de 3 corretores, a frota passa a crescer com os imóveis. Um erro de encaixe significa que a agenda oculta passa de 12 horas, então a tentativa seguinte mantém os imóveis e aumenta os corretores. A tabela ainda tem um único ponto. O lugar dessa execução não foi registrado.
+Depois da escada de 3 corretores, a frota passa a crescer com os imóveis. Instâncias com carga de visitas superior à capacidade de jornada máxima permitida chegam ao resolvedor; o pré-resolvedor do Gurobi comprova a infactibilidade em poucos segundos (0 nós de branch-and-bound explorados), sem depender de interrupções heurísticas no gerador Python.
 
 #figure(
   table(
-    columns: (2.4cm, 2.2cm, 2cm, 2.2cm, 1fr),
-    table.header([Lugar], [Imóveis], [Modelo], [Corretores], [Status]),
-    [não registrado], [200], [M3], [16], [não cabe no dia de trabalho mais longo],
+    columns: (2.4cm, 2cm, 1.8cm, 2.2cm, 3.2cm, 1fr),
+    table.header([Lugar], [Imóveis], [Modelo], [Corretores], [Status], [Tempo (s)]),
+    [São Paulo], [200], [M3], [16], [inviável (presolve)], [92,83],
   ),
-  caption: [Primeiro ponto do teste de estresse. Semente 8, `raw = False`. O restante da sequência ainda não foi preenchido.],
+  caption: [Instância de estresse avaliada com a formulação completa. Semente 8, `raw = False`. O pré-resolvedor do Gurobi comprova a infactibilidade matemática (0 nós explorados) decorrente do estouro da capacidade máxima de 12 horas.],
 )
 
 = Análise e discussão dos resultados
 
-M1 e M3 compartilham o teste das 12 horas, por isso param no mesmo tamanho: 40 imóveis ainda cabem em Moema e 50 não cabem; na cidade, 25 cabem e 30 não cabem. O M2 para antes porque os turnos são rígidos e um corretor está de folga. O M1.a, sem nenhuma visita marcada, não falha na geração. Em Moema ele resolve 5 imóveis e atinge o limite de tempo em 10. Na cidade resolve 5 e 10, este em 243,0094 s, e atinge o limite em 15.
+M1 e M3 compartilham a restrição de jornada máxima ($J_max = 720$ min) e de duração de frota ($sum_i s_i <= sum_k (J_k - s_(k, "lunch"))$). Por isso, atingem a fronteira de infactibilidade no mesmo tamanho: 40 imóveis ainda são factíveis em Moema e 50 tornam-se inviáveis; na capital inteira, 25 são factíveis e 30 tornam-se inviáveis. Anteriormente, essas instâncias eram interrompidas na geração em Python; com a entrega direta ao resolvedor, o pré-resolvedor (presolve) do Gurobi detecta a impossibilidade física em fração de segundo ($< 1$ s), sem explorar nenhum nó na árvore de busca.
+
+O modelo M2 para antes porque os turnos são rígidos (dois turnos de 4 horas por corretor ativo) e um dos três corretores está escalado em regime de folga semanal ($T_(3,1) = T_(3,2) = 0$). Isso limita a frota útil a apenas 2 corretores e 16 horas totais de trabalho, tornando inviáveis as instâncias de 20 imóveis em Moema e de 15 imóveis na capital inteira.
+
+O modelo M1.a, sem horários marcados (`FIXED_RATIO = 0`), exibe ganho drástico de desempenho com a introdução das restrições lineares aditivas de duração de rota e frota (`route_duration_constraint` e `fleet_duration_constraint`). Antes dessas restrições, a relaxação linear atribuía $y_k approx 0$, gerando limitantes inferiores artificiais (entre 29 e 374) e gaps de $99,9%$, o que fazia o modelo atingir o tempo limite de 300 s já em 10 imóveis em Moema e demandar 243 s para 10 imóveis na capital. Com o limitante inferior estrito na soma de $y_k$, a relaxação na raiz fecha o gap quase imediatamente, permitindo resolver otimamente até 15 imóveis em Moema (em 0,42 s) e até 20 imóveis na capital (em 0,82 s).
 
 O atraso impresso do M3, nos dois lugares, é 10 minutos vezes o número de imóveis: 50, 100, 150, e assim por diante, até 400 em 40 imóveis. A resolução única minimiza $f_2$, o custo dos corretores em minutos fora dos turnos, na folga e na viagem extra de almoço. O atraso da agência não entra nesse objetivo, e a tolerância permite até 10 minutos por visita. O notebook ainda imprime atraso, hora extra e distância, porque o impressor é o das rotas abertas do M1. Esses três números não são $f_2$, e $f_2$ não foi impresso. A hora extra impressa também não é o objetivo da resolução.
 
 A distância do M2 fica acima da do M1 no mesmo tamanho. O M2 paga a viagem até o destino de cada turno, a casa ou o ponto de almoço, e os horários marcados são outros, porque a agenda foi encaixada nos turnos. A distância do M1 não conta a volta para casa nem as pernas virtuais do almoço.
 
-No M1.a com nenhuma visita marcada, a hora extra impressa é zero nos três casos ótimos, e a distância cai em relação ao M1 da mesma amostra: 4,24 contra 84,45 em cinco imóveis de Moema, e 85,04 contra 144,91 em cinco imóveis na cidade. Sem horário marcado, o modelo pode reordenar as visitas. A comparação de distância com o M1 continua sendo desempate de planos que já empataram em tempo, não um custo em reais.
-
-Reexecutar o mesmo tamanho de M1 e de M2 em Moema manteve o plano impresso e mudou só o tempo de parede. A tabela guarda o tempo da última execução.
-
-
+No M1.a com nenhuma visita marcada, a hora extra impressa é zero em todos os casos ótimos, e a distância cai substancialmente em relação ao M1 da mesma amostra: 4,24 contra 84,45 em cinco imóveis de Moema, e 85,04 contra 144,91 em cinco imóveis na cidade. Sem horário marcado, o modelo tem total liberdade para reordenar a sequência de visitas de acordo com a topologia viária.
 
 = Suíte de testes automatizados
 
 Além dos experimentos computacionais no catálogo real, a integridade matemática das formulações e a robustez do pipeline de dados são verificadas por uma suíte de testes unitários e de integração implementada em Python (`unittest`), localizada no diretório `tests/`.
 
-A suíte contém 73 testes automatizados cobrindo os seguintes componentes:
+A suíte contém 78 testes automatizados cobrindo os seguintes componentes:
 
 1. *Infactibilidade no pré-resolvedor (presolve)*: testes em `test_hidden_schedule.py` confirmam que as restrições lineares aditivas de duração de rota e frota (`route_duration_constraint` e `fleet_duration_constraint`) adicionadas aos modelos M1, M1.a, M2 e M3 permitem ao pré-resolvedor do Gurobi detectar imediatamente instâncias cuja carga horária total de visitas excede o tempo útil disponível dos corretores, provando infactibilidade na etapa de presolve sem entrar na relaxação linear ou árvore de branch-and-bound.
 2. *Agenda oculta e limites de jornada*: verificação de que a agenda oculta de referência aloca as visitas sem sobreposição e rejeita dias que extrapolam o limite máximo estrito de 12 horas ($J_max = 720$ min).
