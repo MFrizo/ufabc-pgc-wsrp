@@ -49,6 +49,8 @@ On m1 the fleet term pushes the solver to load as many visits as possible onto e
 
 **Service and travel time as an explicit linear bound.** The Big-M time-flow inequalities already enforce $w_{f_k} - w_{d_k} \le J_{\max}$ in m1 and $w_i + s_i \le L_r$ in m2 on integer solutions, but when $x_{ijk}$ is fractional the $-M(1 - x_{ijk})$ term deactivates the chain. Adding the linear route and fleet duration inequalities (`route_duration_constraint` and `fleet_duration_constraint` in m1, m1.a and m3; `shift_duration_constraint` and `fleet_duration_constraint` in m2) exposes the additive part of the time limit directly in $x$ and $y$, so the solver's presolver immediately rejects instances whose visit durations exceed the available broker time.
 
+To allow the solver to handle these bounds directly without premature Python interruptions, `generate_wsrp_instance` defaults to `raise_on_fit_failure = False`. When a sample exceeds the 12-hour day or shift limits, the generator sets `schedule_overflow = True`, logs an informative message, and passes the instance to the solver, where Gurobi's presolver proves mathematical infeasibility in $< 0.05$ s (0 nodes explored). For automated fleet sizing (`--brokers auto`), `_auto_fleet_instance` inspects `schedule_overflow` and day limits to ensure only a non-overflowing fleet size is selected before sampling the final fleet.
+
 **Seats in the broker's car.** Driving the client between properties is a pickup-and-delivery problem (a dial-a-ride problem). It is outside the scope of these models.
 
 ## Wording for the thesis

@@ -19,9 +19,17 @@ def _overfull(**overrides):
 
 
 class HiddenScheduleTest(unittest.TestCase):
-    def test_default_refuses_a_day_the_visits_cannot_pack(self):
+    def test_raise_on_fit_failure_refuses_a_day_the_visits_cannot_pack(self):
         with self.assertRaises(ValueError):
-            _overfull()
+            _overfull(raise_on_fit_failure=True)
+
+    def test_default_hidden_schedule_passes_overfull_day_and_proves_infeasible(self):
+        instance = _overfull()
+        self.assertTrue(instance['hidden_schedule'])
+        self.assertTrue(instance['schedule_overflow'])
+        model = BUILDERS['m1'](instance)
+        _, metrics = solve_model(model, mip_gap=0, raw=False, time_limit=30)
+        self.assertEqual(metrics['termination_condition'], 'infeasible')
 
     def test_off_returns_the_same_instance_and_reaches_the_solver(self):
         first = _overfull(hidden_schedule=False)
