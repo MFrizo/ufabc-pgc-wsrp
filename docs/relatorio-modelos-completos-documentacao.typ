@@ -62,7 +62,7 @@ Cada corretor que trabalha sai da própria casa, faz uma pausa de almoço de uma
 
 O modelo otimiza o começo do dia. Rodá-lo de novo a partir da posição atual dos corretores, quando as visitas mudam, fica com quem chama o modelo. O modelo em si é estático.
 
-A configuração de instância é `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, velocidade `NORMAL_SPEED`, `start_at_homes = True`, almoço $(180, 360, 60)$ e `max_day_length = 720`. A semente padrão do M1 é 8. Toda visita está marcada: um `fixed_ratio` passado por fora é ignorado, porque M1, M2 e M3 estão em `STRICT_TIME_MODELS`.
+A configuração padrão de instância é `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, velocidade `NORMAL_SPEED`, `start_at_homes = True`, almoço $(180, 360, 60)$ e `max_day_length = 720`. A semente padrão do M1 é 8. Por padrão toda visita está marcada (`fixed_ratio = 1.0`), mas `fixed_ratio` (ou `--fixed-ratio` em `main.py`) pode assumir qualquer valor em $[0, 1]$ para repartir os imóveis entre visitas marcadas ($C_h$) e visitas flexíveis ($C_w$). M2 e M3 permanecem em `STRICT_TIME_MODELS` e marcam todas as visitas.
 
 == Conjuntos
 
@@ -72,6 +72,8 @@ A configuração de instância é `num_brokers = 3`, `fixed_ratio = 1.0`, `servi
     table.header([Símbolo], [Pyomo], [Definição]),
     [$K = {1, dots, m}$], [`model.K`], [Corretores],
     [$C = {1, dots, n}$], [`model.C`], [Imóveis a visitar],
+    [$C_h subset.eq C$], [`model.C_h`], [Visitas marcadas (`fixed_visits`), com início $h_i$],
+    [$C_w = C backslash C_h$], [`model.C_w`], [Visitas flexíveis, com janela $[e_i, l_i]$],
     [$D = {d_k : k in K}$], [`model.D`], [Casa do corretor $k$, com $d_k = n + k$],
     [$F = {f_k : k in K}$], [`model.F`], [Fim virtual do dia de $k$, com $f_k = n + m + k$],
     [$A = {a_k : k in K}$], [`model.A`], [Almoço virtual de $k$, com $a_k = n + 2m + k$],
@@ -104,7 +106,8 @@ No grafo de visitas, $(i, j, k)$ e $(j, i, k)$ são arcos diferentes. A distânc
     [$c^k_(i j)$], [`model.distance`], [Distância do arco $(i, j, k)$],
     [$t^k_(i j)$], [`model.travel_time`], [Tempo de viagem do arco, no único período],
     [$s_i$], [`model.service`], [Duração no nó $i$],
-    [$h_i$], [`model.scheduled`], [Início marcado da visita no imóvel $i$],
+    [$h_i$], [`model.scheduled`], [Início marcado da visita $i in C_h$],
+    [$e_i$, $l_i$], [`earliest`, `latest`], [Janela $[e_i, l_i]$ da visita flexível $i in C_w$],
     [$tau$], [`model.tolerance`], [Tolerância de 10 minutos, antes ou depois],
     [$E_k$, $L_k$], [`shift_start`, `shift_end`], [Início e fim regular do dia: 8h e 17h],
     [$J_max$], [`model.max_day_length`], [Dia mais longo, 720 minutos],
@@ -136,7 +139,7 @@ $t^k_(i j)$ segue os mesmos casos com os tempos de viagem do único período. A 
 Os limites e os pesos calculados a partir dos dados são
 
 $
-H = max( max_(i in C) (h_i + tau + s_i), thin overline(lambda) + 60, thin max_(k in K) E_k )
+H = max( max_(i in C_h) (h_i + tau + s_i), thin max_(i in C_w) (l_i + s_i), thin overline(lambda) + 60, thin max_(k in K) E_k )
 $
 $
 M = H + max_(i in V) s_i + max_((i, j, k) in cal(A)) t^k_(i j)
@@ -154,7 +157,7 @@ $
 W_"frota" = (n + m) (max_((i, j, k) in cal(A)) t^k_(i j)) W_"tempo" + U W_"dist"
 $
 $
-+ n tau W_"atraso" + (sum_(k in K) max(0, H - L_k)) W_"extra" + 1
++ |C_h| tau W_"atraso" + (sum_(k in K) max(0, H - L_k)) W_"extra" + 1
 $
 
 Esse peso é maior que tempo de viagem, distância, atraso e hora extra de qualquer plano somados. Um corretor a menos vem sempre primeiro.
@@ -168,7 +171,7 @@ Esse peso é maior que tempo de viagem, distância, atraso e hora extra de qualq
     [$x_(i j k)$], [`model.x`], [${0, 1}$], [1 se $k$ vai direto de $i$ a $j$],
     [$y_k$], [`model.y`], [${0, 1}$], [1 se $k$ trabalha no dia],
     [$w_i$], [`model.w`], [$[0, H]$], [Início no nó $i$],
-    [$delta_i$], [`model.delay`], [$RR_(>= 0)$], [Minutos de atraso da visita $i$],
+    [$delta_i$], [`model.delay`], [$RR_(>= 0)$], [Minutos de atraso da visita $i$ ($0$ para $i in C_w$)],
     [$o_k$], [`model.overtime`], [$RR_(>= 0)$], [Minutos de hora extra do corretor $k$],
   ),
   caption: [Variáveis do M1. $w_(d_k)$ é a saída de casa e $w_(f_k)$ é o fim do dia.],
@@ -182,7 +185,7 @@ $
 min thin W_"frota" sum_(k in K) y_k
 + W_"tempo" sum_((i, j, k) in cal(A)) t^k_(i j) thin x_(i j k)
 + W_"dist" sum_((i, j, k) in cal(A)) c^k_(i j) thin x_(i j k)
-+ W_"atraso" sum_(i in C) delta_i
++ W_"atraso" sum_(i in C_h) delta_i
 + W_"extra" sum_(k in K) o_k
 $
 
@@ -214,9 +217,13 @@ $ sum_(i : (i, h, k) in cal(A)) x_(i h k) - sum_(j : (h, j, k) in cal(A)) x_(h j
 
 $ w_i + s_i + t^k_(i j) - M (1 - x_(i j k)) <= w_j quad forall (i, j, k) in cal(A) $
 
-* (7) Janelas flexíveis.* A visita começa no máximo $tau$ minutos antes ou depois do horário marcado, e os minutos depois desse horário são o atraso:
+* (7a) Janelas brandas das visitas marcadas.* A visita marcada começa no máximo $tau$ minutos antes ou depois do horário marcado, e os minutos depois desse horário são o atraso:
 
-$ w_i >= h_i - tau, quad w_i <= h_i + delta_i, quad delta_i <= tau quad forall i in C $
+$ w_i >= h_i - tau, quad w_i <= h_i + delta_i, quad delta_i <= tau quad forall i in C_h $
+
+* (7b) Janelas das visitas flexíveis.* A visita flexível começa em qualquer instante de sua janela no dia e não tem atraso:
+
+$ e_i <= w_i <= l_i, quad delta_i = 0 quad forall i in C_w $
 
 * (8) Jornada.* O corretor não sai de casa antes do início do dia. O que passar do fim regular é hora extra. O dia inteiro não passa do limite legal, tanto no relógio quanto na soma de serviços e viagens da rota e da frota:
 
@@ -236,17 +243,13 @@ As rotas são abertas. O dia termina no fim da última visita, ou do almoço se 
 
 O almoço também é um nó virtual. Os arcos que entram e saem de $a_k$ têm distância zero e tempo zero. A viagem do último imóvel antes do almoço até o primeiro depois dele, portanto, não é cronometrada nem contada. Se o almoço é a primeira parada, a viagem de casa até a primeira visita também fica livre. A agenda oculta do gerador, ao contrário, conta a viagem depois do almoço a partir do último imóvel anterior.
 
-A janela lê só o início marcado $h_i$. Com `fixed_ratio = 1` os dois extremos da janela do gerador coincidem. Começar até $tau$ minutos adiantado não custa nada. A hora extra é branda depois das 17h e rígida em 12 horas a partir da saída de casa. Um corretor com $y_k = 0$ não usa arcos; os horários da casa, do fim do dia e do almoço dele continuam existindo e continuam satisfazendo a jornada e a janela de almoço.
+A parcela de visitas marcadas ($C_h$) vem de `fixed_ratio` (padrão `1.0`, configurável por `--fixed-ratio`). Para $i in C_h$, os dois extremos da janela do gerador coincidem em $h_i$, e começar até $tau$ minutos adiantado não custa nada; para $i in C_w$, a visita pode começar em qualquer instante de $[e_i, l_i]$ sem atraso. A hora extra é branda depois das 17h e rígida em 12 horas a partir da saída de casa. Um corretor com $y_k = 0$ não usa arcos; os horários da casa, do fim do dia e do almoço dele continuam existindo e continuam satisfazendo a jornada e a janela de almoço.
 
 Os pesos de tempo, atraso e hora extra multiplicam minutos. O peso da distância multiplica unidades do mapa e fica abaixo de um minuto de direção em qualquer plano viável. Um preço em reais por quilômetro é o objetivo do M2. O M1 permanece em minutos, num único período de tempo de viagem. Os horários de pico ficam nos modelos M0.5 e M0.6.
 
-== M1.a, o mesmo modelo com visitas flexíveis
+== M1.a, reformulação sem Big-M global
 
-O M1.a usa a formulação do M1. A única diferença de instância é a parcela de visitas com horário marcado. No código, o padrão é `fixed_ratio = 0.5`: metade das visitas tem início fixo e a outra metade pode começar em qualquer instante que ainda termine dentro do dia. Nos experimentos computacionais, `FIXED_RATIO` foi 0, então nenhuma visita tinha horário marcado. M1, M2 e M3 ignoram esse parâmetro e marcam todas as visitas.
-
-== M1.b, reformulação sem Big-M global
-
-O M1.b (`build_model_m1_b`, em `src/models/model_1_b.py`) mantém o conjunto viável e o objetivo do M1.a (e do M1 quando `fixed_ratio = 1`), mas substitui a constante global $M$ da restrição (6) por três fortalecimentos da relaxação linear:
+O M1.a (`build_model_m1_a`, em `src/models/model_1_a.py`) mantém exatamente o conjunto viável e o objetivo do M1 para qualquer `fixed_ratio`, mas substitui a constante global $M$ da restrição (6) por três fortalecimentos da relaxação linear:
 
 1. *Pré-processamento das janelas $[a_i, b_i]$ (redução de domínio)* por propagação iterativa de alcançabilidade para frente e para trás até convergir:
 
@@ -521,7 +524,7 @@ No comportamento original do gerador, quando as visitas extrapolavam o limite de
 
 No caso do dimensionamento automático de frota (`--brokers auto`), a busca em `_auto_fleet_instance` inspeciona explicitamente a flag `schedule_overflow` e a duração máxima do dia para cada tamanho candidato, garantindo que o menor número de corretores viável (`schedule_brokers`) seja incrementado até que toda a carga de visitas caiba de forma factível, antes de sortear o tamanho final da frota.
 
-Depois da agenda, a parcela `fixed_ratio` das visitas fica com início fixo igual ao da referência. As outras podem começar em qualquer instante que ainda as termine dentro do horizonte. M1, M2 e M3 forçam a parcela em 1. O M1.a dos experimentos usou 0, então a agenda existe, mas nenhuma visita chega ao modelo com horário marcado. A agenda do M1 e a do M1.a coincidem quando só a parcela muda: o que muda é quais visitas são fixadas.
+Depois da agenda, a parcela `fixed_ratio` das visitas fica com início fixo igual ao da referência. As outras podem começar em qualquer instante que ainda as termine dentro do horizonte. M2 e M3 forçam a parcela em 1 (`STRICT_TIME_MODELS`). M1 e M1.a aceitam qualquer `fixed_ratio` em $[0, 1]$, com padrão 1,0 em `INSTANCE_SETTINGS`. A agenda do M1 e a do M1.a coincidem quando a mesma parcela é usada: o que muda entre os dois é apenas a formulação matemática de propagação de tempo e eliminação de subciclos.
 
 == Distâncias na instância real de São Paulo
 
@@ -627,7 +630,7 @@ O nome dinâmico nos três títulos não significa reotimização dentro do MILP
 
 = Referências citadas nas notas
 
-As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.b.md`, `m2.md` e `m3.md`. As que este texto nomeia são:
+As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m2.md` e `m3.md`. As que este texto nomeia são:
 
 - Ballou, Rahardja e Sakai (2002), fatores de circuidade.
 - Bektaş e Laporte (2011), problema de roteamento com poluição.

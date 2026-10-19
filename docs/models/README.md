@@ -2,7 +2,7 @@
 
 M0.0 to M0.6 are sub-steps. Each one adds one feature, and together they lead to M1, the first complete model: brokers leave home, routes are open, and the day has a lunch break, soft time windows, overtime and a 12-hour limit.
 
-M1.a is a subcase of M1 in which only a share of the visits are booked. M1.b is a reformulation of M1 and M1.a that replaces the single global Big-M constant with time-window preprocessing, arc-specific $M^k_{ij}$ coefficients, and Desrochers–Laporte lifted time-window bounds. M2 is the broker-focused model: each broker works his own morning and afternoon shift. M3 is the Pareto front between the agency's objective and the brokers' objective, on M1's feasible set.
+M1.a is a reformulation of M1 that replaces the single global Big-M constant with time-window preprocessing, arc-specific $M^k_{ij}$ coefficients, and Desrochers–Laporte lifted time-window bounds. M2 is the broker-focused model: each broker works his own morning and afternoon shift. M3 is the Pareto front between the agency's objective and the brokers' objective, on M1's feasible set.
 
 Each page lists the sets, parameters, decision variables, objective function and constraints of the model as implemented in `src/models/`, and ends with the complete formulation.
 
@@ -15,9 +15,8 @@ Each page lists the sets, parameters, decision variables, objective function and
 | [M0.4](m0.4.md) | sub-step | VRPTWWVST | M0.3 | A service time of its own for each visit | Distance |
 | [M0.5](m0.5.md) | sub-step | TDVRPTW | M0.4 | Travel time by the period of the day the trip leaves in | Time out of the agency |
 | [M0.6](m0.6.md) | sub-step | FSMVRPTW | M0.5 | Fleet minimization | Brokers, then time out of the agency |
-| [M1](m1.md) | first complete model | MO-DOMDVRPTW-SD | M0.4–M0.6 | Brokers start at home, open routes, lunch break, soft windows, overtime, 12-hour days | Brokers, then travel time, delay and overtime |
-| [M1.a](m1.a.md) | subcase of M1 | MO-DOMDVRPTW-SD with flexible visits | M1 | Only a share of the visits booked; the others may start at any time of the day | Brokers, then travel time, delay and overtime |
-| [M1.b](m1.b.md) | tightened MTZ reformulation | MO-DOMDVRPTW-SD with lifted MTZ | M1, M1.a | Time-window preprocessing, arc-specific $M^k_{ij}$, broker-lifted propagation and Desrochers–Laporte bounds | Brokers, then travel time, delay and overtime |
+| [M1](m1.md) | first complete model | MO-DOMDVRPTW-SD | M0.4–M0.6 | Brokers start at home, open routes, lunch break, booked ($C_h$) and flexible ($C_w$) windows, overtime, 12-hour days | Brokers, then travel time, delay and overtime |
+| [M1.a](m1.a.md) | tightened MTZ reformulation | MO-DOMDVRPTW-SD with lifted MTZ | M1 | Time-window preprocessing, arc-specific $M^k_{ij}$, broker-lifted propagation and Desrochers–Laporte bounds | Brokers, then travel time, delay and overtime |
 | [M2](m2.md) | broker-focused model | HC-DOMDVRPTW-SD | M1 | A morning and an afternoon shift per broker, lunch spot, days off, hard shift ends | Fuel, then delay and the longest day |
 | [M3](m3.md) | Pareto front | — | M1 | M1's routes, with the brokers' shifts and days off scored instead of enforced | One plan per fleet size: brokers' cost subject to at most $m$ brokers |
 
@@ -33,14 +32,14 @@ Each page lists the sets, parameters, decision variables, objective function and
 - Broker homes and lunch spots are drawn points, not cached listings. On a synthetic instance their distance uses the same detour factor. On a real instance it stays the straight-line distance, and that trip's travel time stays $\lceil c / v \rceil$.
 - Live traffic, GPS traces and random travel times are left for later. The cached durations are free-flow shortest paths, scaled by the fixed factors above, so the same seed always builds the same MILP. The measurement and the references are in [Distances and travel times](../decisions/travel.md).
 - **Time windows** come from a hidden reference schedule that keeps instances feasible when visits fit within working hours. Within each broker's free time in that schedule, the start of each visit follows a continuous uniform distribution. When visits exceed working-day or shift limits, the generator sets `schedule_overflow = True` and delivers the instance to the solver, where Gurobi's presolver proves mathematical infeasibility in $< 0.05$ s (0 nodes) instead of preemptively raising an error. For `--brokers auto`, `_auto_fleet_instance` checks this flag to ensure a non-overflowing fleet size is selected. A share `fixed_ratio` of the visits is booked at its reference start, so $e_i = l_i$. Every other visit is flexible and may start at any time that lets it end within the day: $e_i = 0$ and $l_i = \text{horizon} - s_i$. The agency's window is the whole day, $[0, \text{horizon}]$.
-- **Booked visits:** M0.2 to M0.6, M1, M2 and M3 run with `fixed_ratio = 1.0`, so every visit is booked. M1, M2 and M3 read the booked time as the scheduled start $h_i`, and ignore a `--fixed-ratio` given in `main.py` (`STRICT_TIME_MODELS`). M1.a runs with `fixed_ratio = 0.5` and only gives the booked visits a scheduled start.
-- **Subtours** are eliminated by MTZ order variables in M0.0 and by the start-time variables $w_i$ with Big-M time-flow constraints from M0.1 on.
+- **Booked visits:** M0.2 to M0.6, M1, M1.a, M2 and M3 default to `fixed_ratio = 1.0`, so every visit is booked by default. M1 and M1.a accept any `--fixed-ratio` in $[0, 1]$, giving the booked visits ($C_h$) a scheduled start $h_i$ and the remaining visits ($C_w$) a day window $[e_i, l_i]$. M2 and M3 book every visit and ignore a `--fixed-ratio` given in `main.py` (`STRICT_TIME_MODELS`).
+- **Subtours** are eliminated by MTZ order variables in M0.0 and by the start-time variables $w_i$ with Big-M time-flow constraints from M0.1 on (and arc-specific tightened and lifted MTZ constraints in M1.a).
 - **Capacity:** no model has a vehicle capacity. What a route can serve is limited only by time (time windows, and the day length and shifts of M1, M1.a, M2 and M3). The decision and the references are in [Capacity](../decisions/capacity.md).
 - **Constraint numbering** on these pages is per model, $(1), (2), \dots$. Each constraint also gives the name of its Pyomo component, which is the stable reference into the code. The `doc` labels in the code (`Constraint 4.1`, `Constraint 5.3`, …) follow an older numbering and differ between models.
 
 ## Instance settings
 
-Each model runs on `generate_wsrp_instance` with its entry of `INSTANCE_SETTINGS` in `src/models/__init__.py` on top of the generator defaults: 5 properties, $T = 30$, $S = 60$, a 600-minute day, `fixed_ratio = 0.2` and 40% of the visits assigned to a broker. `--fixed-ratio` in `main.py` overrides the share of booked visits, except for M1, M2 and M3. The settings of each model are listed on its page.
+Each model runs on `generate_wsrp_instance` with its entry of `INSTANCE_SETTINGS` in `src/models/__init__.py` on top of the generator defaults: 5 properties, $T = 30$, $S = 60$, a 600-minute day, `fixed_ratio = 0.2` and 40% of the visits assigned to a broker. `--fixed-ratio` in `main.py` overrides the share of booked visits, except for M2 and M3. The settings of each model are listed on its page.
 
 ## Experiments
 
