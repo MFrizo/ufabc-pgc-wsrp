@@ -22,6 +22,7 @@
 #show table: set text(size: 8.5pt)
 #show table.cell.where(y: 0): set text(hyphenate: false)
 #show figure: set text(size: 9pt)
+#show figure: set block(breakable: true)
 
 #align(center)[
   #v(2.2cm)
@@ -114,7 +115,7 @@ O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
 
 #figure(
   table(
-    columns: (2.3cm, 2.0cm, 1.4cm, 1.7cm, 1.6cm, 1.5cm, 1.6cm, 1fr),
+    columns: (2.0cm, 2.3cm, 1.4cm, 1.7cm, 1.6cm, 1.4cm, 1.4cm, 1fr),
     table.header([Lugar], [Modelo], [Imóveis], [Tempo (s)], [Corretores], [Atraso], [Extra], [Distância]),
     [Moema], [M1 ($r=1$)], [40], [0,9731], [3 de 3], [0], [452], [293,27],
     [Moema], [M1.a ($r=1$)], [40], [0,6261], [3 de 3], [0], [452], [293,27],
@@ -133,15 +134,17 @@ O maior caso que cada modelo ainda resolveu, no mesmo protocolo:
   caption: [Maior instância ótima de cada série. Atraso e hora extra em minutos. Distância em unidades do mapa (4 por km). M1 e M1.a produzem soluções de qualidade e métricas rigorosamente equivalentes em todos os regimes sob $r=1$ e $r=0$. O M2 não imprime hora extra. O M3 é uma resolução, não a frente.],
 )
 
+#pagebreak()
 = Resultados detalhados em Moema
 
 Três corretores, semente 8, solver no modo `default`. Uma linha em branco no registro original aparece aqui como não executada: o modelo já tinha parado num tamanho menor.
 
 #figure(
   table(
-    columns: (1.1cm, 2.05cm, 3.1cm, 1.7cm, 1.55cm, 1.25cm, 1.25cm, 1fr),
+    inset: (x: 3.5pt, y: 1.8pt),
+    columns: (1.1cm, 2.3cm, 3.1cm, 1.7cm, 1.4cm, 1.1cm, 1.1cm, 1fr),
     align: (center, center, left, right, center, right, right, right),
-    table.header([Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
+    table.header(repeat: true, [Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
     [5], [M1 ($r=1$)], [ótimo], [0,0940], [2 de 3], [0], [40], [84,45],
     [5], [M1.a ($r=1$)], [ótimo], [0,3375], [2 de 3], [0], [40], [84,45],
     [5], [M1 ($r=0,5$)], [ótimo], [0,1013], [2 de 3], [0], [40], [4,24],
@@ -210,15 +213,16 @@ Três corretores, semente 8, solver no modo `default`. Uma linha em branco no re
   caption: [Moema. Atraso e hora extra em minutos. Distância em unidades do mapa. Os planos de M1 ($r=1$) e M1.a ($r=1$) foram rigorosamente idênticos em todas as instâncias viáveis, com M1.a consistentemente mais rápido para $N >= 10$.],
 )
 
+#pagebreak()
 = Resultados detalhados em São Paulo (cidade inteira)
 
 A cidade inteira, sem bairro. A amostra é de 6.874 anúncios. O resto do protocolo é o de Moema.
 
 #figure(
   table(
-    columns: (1.1cm, 2.05cm, 3.1cm, 1.7cm, 1.55cm, 1.25cm, 1.25cm, 1fr),
+    columns: (1.1cm, 2.3cm, 3.1cm, 1.7cm, 1.4cm, 1.1cm, 1.1cm, 1fr),
     align: (center, center, left, right, center, right, right, right),
-    table.header([Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
+    table.header(repeat: true, [Imóveis], [Modelo], [Status], [Tempo (s)], [Usados], [Atraso], [Extra], [Dist.]),
     [5], [M1 ($r=1$)], [ótimo], [0,0760], [2 de 3], [0], [50], [144,91],
     [5], [M1 ($r=0$)], [ótimo], [0,2191], [2 de 3], [0], [0], [85,04],
     [5], [M1.a ($r=1$)], [ótimo], [0,0556], [2 de 3], [0], [50], [144,91],
