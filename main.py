@@ -13,8 +13,7 @@ Usage:
     python main.py --model m0.5    # Sub-step: TDVRPTW
     python main.py --model m0.6    # Sub-step: FSMVRPTW
     python main.py --model m1      # Moema, 5 houses, 3 brokers, seed 8, gap 0, 30 min
-    python main.py --model m1.a    # Same instance; the booked share stays the model's own
-    python main.py --model m1.b    # Tightened and lifted MTZ reformulation of m1 / m1.a
+    python main.py --model m1.a    # Tightened and lifted MTZ reformulation of m1
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
     python main.py --model m3      # Pareto front of the agency and the brokers
 
@@ -58,7 +57,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
             src.models.DEFAULT_SEEDS or DEFAULT_SEED. The series uses 8.
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
-            the others may start at any time of the day. m1, m2 and m3 warn and ignore it. None keeps
+            the others may start at any time of the day. m2 and m3 warn and ignore it. None keeps
             the model's own setting.
         hidden_schedule (Optional[bool]): Whether the time windows come from a hidden reference day
             that keeps the instance feasible. False draws each booked start on its own and lets the
@@ -172,9 +171,8 @@ if __name__ == "__main__":
     parser.add_argument('--fixed-ratio', type=_ratio, default=None,
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
-                             "distribution over each broker's free time. m1, m2 and m3 book every visit, so they warn "
-                             "and ignore it; m1.a is m1 with this share of the visits booked (default: the model's "
-                             "own setting)")
+                             "distribution over each broker's free time. m2 and m3 book every visit, so they warn "
+                             "and ignore it (default: the model's own setting)")
     parser.add_argument('--no-hidden-schedule', action='store_true',
                         help="Draw each booked start on its own, without the feasible reference day, "
                              "so the solver may receive an infeasible instance (default: the hidden schedule is on)")

@@ -1,12 +1,14 @@
 """
 Module: model_1_a
 Description: Mathematical formulation of M1.a for the WSRP.
-             M1 (MO-DOMDVRPTW-SD) with a share of flexible visits: only the visits
-             already booked by the visitors have a scheduled start, kept within tol minutes;
-             every other visit may start at any time of its window, the whole working day.
-             The share of booked visits is the instance's fixed_ratio, so comparing M1.a runs
-             with different ratios, and with M1 (every visit booked), measures how much the
-             hard schedule weighs on the solver.
+             M1 (MO-DOMDVRPTW-SD with booked and flexible visits) reformulated
+             without a single global Big-M constant:
+             1. Iterative time-window domain reduction [a_i, b_i] by network reachability;
+             2. Arc-specific tightened Big-M parameters M^k_{ij} = max(0, b_i + s_i + t^k_{ij} - a_j)
+                and fixing of time-infeasible arcs (a_i + s_i + t^k_{ij} > b_j);
+             3. Desrochers and Laporte (1991) lifted time-window bounds, broker-aggregated
+                time propagation, and two-cycle elimination constraints (with the waiting-time
+                validity correction noted by Yuan et al., 2020).
 """
 
 import pyomo.environ as pyo
@@ -18,54 +20,31 @@ from src.models.model_1 import (DELAY_TOLERANCE, DELAY_WEIGHT, LUNCH_DURATION, L
 
 def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     """
-    Constructs the MILP polyhedron for the M1.a routing problem (M1 with flexible visits).
+    Constructs the tightened and lifted MTZ MILP polyhedron for M1.a (reformulation of M1).
 
     Args:
-        data (dict): A dictionary containing instance parameters:
-            - 'num_nodes' (int): Number of nodes of the generator. Nodes 1..n are the properties;
-              node 0, the agency, isn't used, as every broker leaves his own home.
-            - 'num_brokers' (int): Number of brokers |K|.
-            - 'distance_matrix' (list of lists): 2D array of distances c_ij between properties.
-            - 'travel_times' (list): 2D array of travel times t_ij between properties, in its
-              first (and only) period.
-            - 'home_distances' (list): Distance from the home of each broker to each node.
-            - 'home_travel_times' (list): Travel time from the home of each broker to each node,
-              in its first (and only) period.
-            - 'service_times' (list): Duration s_i of the visit at every property.
-            - 'fixed_visits' (list): The booked properties, which have a scheduled start.
-            - 'earliest_start' (list): Scheduled start h_i of a booked visit, and earliest start
-              e_i of a flexible one.
-            - 'latest_start' (list): Latest start l_i of a flexible visit.
-            - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
-            - 'shift_start' / 'shift_end' (list): Start E_k and regular end L_k of each broker's day.
-            - 'max_day_length' (int, optional): Longest day J_max, in minutes. Defaults to 12 hours.
-            - 'fleet_weight', 'travel_weight', 'distance_weight', 'delay_weight', 'overtime_weight'
-              (float, optional): Weights of the objective. The fleet weight is computed if
-              absent. The distance weight, if absent, only breaks ties between plans whose
-              travel time, delay and overtime are equal.
+        data (dict): Instance dictionary with the same keys as build_model_m1.
 
     Returns:
-        pyo.ConcreteModel: The unoptimized abstract mathematical model.
+        pyo.ConcreteModel: The unoptimized mathematical model.
     """
-    model = pyo.ConcreteModel(name="WSRP_M1_A_MO_DOMDVRPTW_SD_FLEXIBLE")
+    model = pyo.ConcreteModel(name="WSRP_M1_A_MO_DOMDVRPTW_SD_LIFTED_MTZ")
 
     num_properties = data['num_nodes'] - 1
     num_brokers = data['num_brokers']
+    fixed_visits = sorted(data.get('fixed_visits', range(1, num_properties + 1)))
+    latest_start = data.get('latest_start', data['earliest_start'])
 
     # =========================================================================
     # 1. SETS (Indices)
     # =========================================================================
-    # K = {1, ..., k}: Set of brokers available
     model.K = pyo.Set(initialize=range(1, num_brokers + 1), doc="Brokers")
 
-    # C = {1, ..., n}: Set of properties to be visited, split in the booked visits (C_h),
-    # which have a scheduled start, and the flexible ones (C_w), which have a window
     model.C = pyo.Set(initialize=range(1, num_properties + 1), doc="Properties")
-    model.C_h = pyo.Set(initialize=sorted(data['fixed_visits']), within=model.C, doc="Booked visits")
+    model.C_h = pyo.Set(initialize=fixed_visits, within=model.C, doc="Booked visits")
     model.C_w = pyo.Set(initialize=[i for i in model.C if i not in model.C_h], within=model.C,
                         doc="Flexible visits")
 
-    # D, F, A: Home (d_k), virtual end of the day (f_k) and virtual lunch (a_k) of each broker
     def depot_rule(model_instance, k):
         return num_properties + k
 
@@ -83,12 +62,8 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.F = pyo.Set(initialize=[end_rule(model, k) for k in model.K], doc="Ends of the day")
     model.A = pyo.Set(initialize=[lunch_rule(model, k) for k in model.K], doc="Lunches")
 
-    # V = C U D U F U A: Set of all nodes
     model.V = model.C | model.D | model.F | model.A
 
-    # Arcs each broker may take: from his home to a property or to lunch, from a property
-    # to another property, to lunch or to the end of the day, and from lunch to a property
-    # or to the end of the day
     def arcs_rule(model_instance):
         for k in model_instance.K:
             d, f, a = depot_rule(model_instance, k), end_rule(model_instance, k), lunch_rule(model_instance, k)
@@ -102,12 +77,14 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
                 yield a, j, k
 
     model.ARCS = pyo.Set(dimen=3, initialize=arcs_rule, doc="Arcs (i, j, k) broker k may take")
+    model.PAIRS = pyo.Set(dimen=2, initialize=[(i, j) for i in model.C for j in model.C if i != j],
+                          doc="Ordered property pairs (i, j)")
+    model.UPPER_PAIRS = pyo.Set(dimen=2, initialize=[(i, j) for i in model.C for j in model.C if i < j],
+                                doc="Unordered property pairs (i, j) with i < j")
 
     # =========================================================================
-    # 2. PARAMETERS (Data)
+    # 2. PARAMETERS (Data & Time-Window Preprocessing)
     # =========================================================================
-    # c_ij / t_ij: Distance and travel time of each arc. The end of the day and the lunch
-    # are virtual nodes, so the trips to and from them have no distance and no time
     def broker_of_home(i):
         return i - num_properties
 
@@ -128,7 +105,6 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.distance = pyo.Param(model.ARCS, initialize=distance_rule, doc="Distance c_ij")
     model.travel_time = pyo.Param(model.ARCS, initialize=travel_time_rule, doc="Travel time t_ij")
 
-    # s_i: Duration of the visit at node i; the lunch lasts s_ak = 60 minutes
     def service_rule(model_instance, i):
         if i in model_instance.C:
             return data['service_times'][i]
@@ -136,18 +112,12 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
 
     model.service = pyo.Param(model.V, initialize=service_rule, doc="Service time s_i")
 
-    # h_i: Scheduled start of a booked visit
     model.scheduled = pyo.Param(model.C_h, initialize=lambda m, i: data['earliest_start'][i],
                                 doc="Scheduled start h_i")
-
-    # [e_i, l_i]: Window of the start of a flexible visit
     model.earliest = pyo.Param(model.C_w, initialize=lambda m, i: data['earliest_start'][i], doc="Earliest start e_i")
-    model.latest = pyo.Param(model.C_w, initialize=lambda m, i: data['latest_start'][i], doc="Latest start l_i")
-
-    # tol: Max minutes a booked visit starts before or after its scheduled time
+    model.latest = pyo.Param(model.C_w, initialize=lambda m, i: latest_start[i], doc="Latest start l_i")
     model.tolerance = pyo.Param(initialize=DELAY_TOLERANCE, doc="Tolerance tol")
 
-    # E_k / L_k: Start and regular end of each broker's working day
     def shift_start_rule(model_instance, k):
         return data['shift_start'][k - 1]
 
@@ -156,30 +126,33 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
 
     model.shift_start = pyo.Param(model.K, initialize=shift_start_rule, doc="Day start E_k")
     model.shift_end = pyo.Param(model.K, initialize=shift_end_rule, doc="Day end L_k")
-
-    # J_max: Longest day a broker may work, from leaving home to his last visit
     model.max_day_length = pyo.Param(initialize=data.get('max_day_length', MAX_DAY_LENGTH), doc="Max day length J_max")
 
-    # P_ik: Compatibility matrix. A visit with another broker already assigned has P_ik = 0
     def eligibility_rule(model_instance, i, k):
         assigned = data['assigned_broker'][i]
         return 1 if assigned in (0, k) else 0
 
     model.eligibility = pyo.Param(model.C, model.K, initialize=eligibility_rule, doc="Compatibility P_ik")
 
-    # H: No start time of an optimal schedule goes past the end of the latest visit or lunch
     horizon = max([data['earliest_start'][i] + DELAY_TOLERANCE + data['service_times'][i] for i in model.C_h]
-                  + [data['latest_start'][i] + data['service_times'][i] for i in model.C_w]
+                  + [latest_start[i] + data['service_times'][i] for i in model.C_w]
                   + [LUNCH_WINDOW[1] + LUNCH_DURATION, max(data['shift_start'])])
 
-    # M: Big-M constant that deactivates the time-flow constraint when x_ijk = 0
-    big_m = data.get('big_m', horizon + max(pyo.value(model.service[i]) for i in model.V)
-                     + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
-    model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
+    # 2.1 Time-Window Preprocessing (Domain Reduction)
+    win_a, win_b = _preprocess_time_windows(model, data, horizon)
+    model.window_start = pyo.Param(model.V, initialize=win_a, doc="Tightened earliest start a_i")
+    model.window_end = pyo.Param(model.V, initialize=win_b, doc="Tightened latest start b_i")
 
-    # W_time, W_dist, W_atraso, W_extra: Weights of the driving time, the distance tie-break,
-    # the delays and the overtime. A plan has at most one paid trip per property and home,
-    # and only the booked visits can be late.
+    # 2.2 Arc-Specific Tightened M^k_{ij} = max(0, b_i + s_i + t^k_{ij} - a_j)
+    def arc_big_m_rule(model_instance, i, j, k):
+        span = (pyo.value(model_instance.window_end[i])
+                + pyo.value(model_instance.service[i])
+                + pyo.value(model_instance.travel_time[i, j, k])
+                - pyo.value(model_instance.window_start[j]))
+        return max(0.0, span)
+
+    model.arc_big_m = pyo.Param(model.ARCS, initialize=arc_big_m_rule, doc="Arc-specific M^k_{ij}")
+
     paid_arcs = num_properties + num_brokers
     max_distance = max(pyo.value(model.distance[arc]) for arc in model.ARCS)
     model.travel_weight = pyo.Param(initialize=data.get('travel_weight', TRAVEL_WEIGHT), doc="W_time")
@@ -188,8 +161,6 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.delay_weight = pyo.Param(initialize=data.get('delay_weight', DELAY_WEIGHT), doc="W_atraso")
     model.overtime_weight = pyo.Param(initialize=data.get('overtime_weight', OVERTIME_WEIGHT), doc="W_extra")
 
-    # W_frota: Larger than the driving time, distance, delays and overtime of any plan put
-    # together, so one broker fewer always comes first.
     max_routes = (paid_arcs * max(pyo.value(model.travel_time[arc]) for arc in model.ARCS)
                   * pyo.value(model.travel_weight)
                   + paid_arcs * max_distance * pyo.value(model.distance_weight)
@@ -201,21 +172,18 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     # =========================================================================
     # 3. DECISION VARIABLES
     # =========================================================================
-    # x_{ijk} = 1 if broker k travels directly from node i to node j, else 0
     model.x = pyo.Var(model.ARCS, domain=pyo.Binary, doc="Edge traversal by broker")
-
-    # y_k = 1 if broker k works in the day, else 0
     model.y = pyo.Var(model.K, domain=pyo.Binary, doc="Broker works")
 
-    # w_i >= 0: Start time of the service (or of the trip) at node i
-    model.w = pyo.Var(model.V, domain=pyo.NonNegativeReals, bounds=(0, horizon), doc="Start time")
+    def w_bounds_rule(model_instance, i):
+        return pyo.value(model_instance.window_start[i]), pyo.value(model_instance.window_end[i])
 
-    # atraso_i >= 0: Minutes of delay of the visit at property i; a flexible visit is never late
+    model.w = pyo.Var(model.V, domain=pyo.NonNegativeReals, bounds=w_bounds_rule, doc="Start time")
+
     model.delay = pyo.Var(model.C, domain=pyo.NonNegativeReals, doc="Delay atraso_i")
     for i in model.C_w:
         model.delay[i].fix(0)
 
-    # he_k >= 0: Minutes of overtime of broker k
     model.overtime = pyo.Var(model.K, domain=pyo.NonNegativeReals, doc="Overtime he_k")
 
     # =========================================================================
@@ -243,8 +211,7 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     def arcs_into(model_instance, j, k):
         return [model_instance.x[i, j, k] for i in model_instance.V if (i, j, k) in model_instance.ARCS]
 
-    # 5.1 Single Service: every property is left exactly once, by exactly one broker,
-    # who must be allowed to visit it
+    # 5.1 Single Service & Compatibility
     def single_service_rule(model_instance, i):
         return sum(sum(arcs_from(model_instance, i, k)) for k in model_instance.K) == 1
 
@@ -255,8 +222,7 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.compatibility_constraint = pyo.Constraint(model.C, model.K, rule=compatibility_rule,
                                                     doc="Constraint 5.1 compatibility")
 
-    # 5.2 Flow Conservation and Open Routes: a broker who works leaves his home once, ends
-    # the day once at his virtual end node, and leaves every node he enters
+    # 5.2 Flow Conservation and Open Routes
     def home_departure_rule(model_instance, k):
         return sum(arcs_from(model_instance, model_instance.depot[k], k)) == model_instance.y[k]
 
@@ -273,17 +239,96 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.flow_conservation_constraint = pyo.Constraint(model.C | model.A, model.K, rule=flow_conservation_rule,
                                                         doc="Constraint 5.2 flow")
 
-    # 5.3 Time Flow: the next node starts only after start + service + travel
-    # Formula: w_i + s_i + t_ij - M * (1 - x_ijk) <= w_j
+    forbid_blocked_arcs(model, data)
+    _fix_time_infeasible_arcs(model)
+
+    # 5.3 Tightened Arc-Specific and Broker-Lifted Time Flow
+    # Formula: w_i - w_j + M^k_{ij} * x_{ijk} <= b_i - a_j
+    # When M^k_{ij} == 0 (i.e. b_i + s_i + t^k_{ij} <= a_j), variable bounds w_i <= b_i and
+    # w_j >= a_j already enforce w_i + s_i + t^k_{ij} <= w_j. When x_{ijk} is fixed to 0,
+    # w_i <= b_i and w_j >= a_j already enforce w_i - w_j <= b_i - a_j.
     def time_flow_rule(model_instance, i, j, k):
-        return (model_instance.w[i] + model_instance.service[i] + model_instance.travel_time[i, j, k]
-                - model_instance.big_m * (1 - model_instance.x[i, j, k]) <= model_instance.w[j])
+        if i in model_instance.C and j in model_instance.C:
+            return pyo.Constraint.Skip
+        if model_instance.x[i, j, k].fixed and pyo.value(model_instance.x[i, j, k]) == 0:
+            return pyo.Constraint.Skip
+        if pyo.value(model_instance.arc_big_m[i, j, k]) <= 0.0:
+            return pyo.Constraint.Skip
+        return (model_instance.w[i] - model_instance.w[j]
+                + model_instance.arc_big_m[i, j, k] * model_instance.x[i, j, k]
+                <= model_instance.window_end[i] - model_instance.window_start[j])
+
+    # For property pairs (i, j) in C x C, at most one broker traverses (i, j), so summing
+    # M^k_{ij} * x_{ijk} across all k in K into one inequality replaces |K| rows with 1 tighter row.
+    def pair_time_flow_rule(model_instance, i, j):
+        active_k = [k for k in model_instance.K
+                    if not (model_instance.x[i, j, k].fixed and pyo.value(model_instance.x[i, j, k]) == 0)
+                    and pyo.value(model_instance.arc_big_m[i, j, k]) > 0.0]
+        if not active_k:
+            return pyo.Constraint.Skip
+        return (model_instance.w[i] - model_instance.w[j]
+                + sum(model_instance.arc_big_m[i, j, k] * model_instance.x[i, j, k] for k in active_k)
+                <= model_instance.window_end[i] - model_instance.window_start[j])
+
+    # Bidirectional 2-cycle elimination coupling (i, j) and (j, i) across all brokers
+    def two_cycle_rule(model_instance, i, j):
+        terms = [model_instance.x[u, v, k]
+                 for (u, v) in ((i, j), (j, i))
+                 for k in model_instance.K
+                 if not (model_instance.x[u, v, k].fixed and pyo.value(model_instance.x[u, v, k]) == 0)]
+        if len(terms) <= 1:
+            return pyo.Constraint.Skip
+        return sum(terms) <= 1
 
     model.time_flow_constraint = pyo.Constraint(model.ARCS, rule=time_flow_rule, doc="Constraint 5.3")
+    model.pair_time_flow_constraint = pyo.Constraint(model.PAIRS, rule=pair_time_flow_rule,
+                                                     doc="Constraint 5.3 lifted pair")
+    model.two_cycle_constraint = pyo.Constraint(model.UPPER_PAIRS, rule=two_cycle_rule,
+                                                doc="Constraint 5.3 two-cycle")
 
-    # 5.4 Soft Time Windows: a booked visit starts at its scheduled time, at most tol minutes
-    # early or late, and the minutes late are its delay
-    # Formula: w_i >= h_i - tol, w_i <= h_i + atraso_i, atraso_i <= tol, for i in C_h
+    # 5.3b Desrochers and Laporte (1991) Lifted Time-Window Bounds
+    # Formula: w_i >= a_i + sum_{(j,i,k)} max(0, a_j + s_j + t^k_{ji} - a_i) * x_{jik}
+    #          w_i <= b_i - sum_{(i,j,k)} max(0, b_i - (b_j - s_i - t^k_{ij})) * x_{ijk}
+    def lifted_early_rule(model_instance, i):
+        a_i = pyo.value(model_instance.window_start[i])
+        terms = []
+        for k in model_instance.K:
+            for j in model_instance.V:
+                if (j, i, k) in model_instance.ARCS:
+                    if model_instance.x[j, i, k].fixed and pyo.value(model_instance.x[j, i, k]) == 0:
+                        continue
+                    coeff = max(0.0, (pyo.value(model_instance.window_start[j])
+                                      + pyo.value(model_instance.service[j])
+                                      + pyo.value(model_instance.travel_time[j, i, k]) - a_i))
+                    if coeff > 0.0:
+                        terms.append(coeff * model_instance.x[j, i, k])
+        if not terms:
+            return pyo.Constraint.Skip
+        return model_instance.w[i] >= a_i + sum(terms)
+
+    def lifted_late_rule(model_instance, i):
+        b_i = pyo.value(model_instance.window_end[i])
+        s_i = pyo.value(model_instance.service[i])
+        terms = []
+        for k in model_instance.K:
+            for j in model_instance.V:
+                if (i, j, k) in model_instance.ARCS:
+                    if model_instance.x[i, j, k].fixed and pyo.value(model_instance.x[i, j, k]) == 0:
+                        continue
+                    coeff = max(0.0, b_i - (pyo.value(model_instance.window_end[j])
+                                            - s_i - pyo.value(model_instance.travel_time[i, j, k])))
+                    if coeff > 0.0:
+                        terms.append(coeff * model_instance.x[i, j, k])
+        if not terms:
+            return pyo.Constraint.Skip
+        return model_instance.w[i] <= b_i - sum(terms)
+
+    model.lifted_early_constraint = pyo.Constraint(model.C | model.A, rule=lifted_early_rule,
+                                                   doc="Constraint 5.3b lifted early")
+    model.lifted_late_constraint = pyo.Constraint(model.C | model.A, rule=lifted_late_rule,
+                                                  doc="Constraint 5.3b lifted late")
+
+    # 5.4 Soft Time Windows (booked visits) & 5.4b Flexible Windows
     def early_start_rule(model_instance, i):
         return model_instance.w[i] >= model_instance.scheduled[i] - model_instance.tolerance
 
@@ -297,19 +342,12 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.soft_window_constraint = pyo.Constraint(model.C_h, rule=soft_window_rule, doc="Constraint 5.4")
     model.delay_tolerance_constraint = pyo.Constraint(model.C_h, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
 
-    # 5.4b Flexible Windows: a flexible visit starts at any time of its window
-    # Formula: e_i <= w_i <= l_i, for i in C_w
     def flexible_window_rule(model_instance, i):
-        return model_instance.earliest[i], model_instance.w[i], model_instance.latest[i]
+        return model_instance.window_start[i], model_instance.w[i], model_instance.window_end[i]
 
     model.flexible_window_constraint = pyo.Constraint(model.C_w, rule=flexible_window_rule, doc="Constraint 5.4b")
 
-    # 5.5 Working Day: a broker doesn't leave home before his day starts, the end of his
-    # day past its regular end is overtime, and his whole day, lunch included, never goes
-    # past the legal limit — both on the clock and as the sum of services and trips
-    # Formula: w_dk >= E_k, w_fk <= L_k + he_k, w_fk - w_dk <= J_max,
-    #          sum_{(i,j)} (s_i + t^k_ij) x_ijk <= J_max * y_k,
-    #          sum_{i in C} s_i + sum_{(i,j,k)} t^k_ij x_ijk <= sum_k (J_max - s_ak) y_k
+    # 5.5 Working Day (clock limits + linear route and fleet duration limits)
     def day_start_rule(model_instance, k):
         return model_instance.w[model_instance.depot[k]] >= model_instance.shift_start[k]
 
@@ -337,8 +375,7 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.route_duration_constraint = pyo.Constraint(model.K, rule=route_duration_rule, doc="Constraint 5.5 duration")
     model.fleet_duration_constraint = pyo.Constraint(rule=fleet_duration_rule, doc="Constraint 5.5 fleet duration")
 
-    # 5.6 Lunch Break: a broker who works goes through his lunch node, starting it
-    # between 11:00 and 14:00
+    # 5.6 Lunch Break
     def lunch_visit_rule(model_instance, k):
         return sum(arcs_into(model_instance, model_instance.lunch[k], k)) == model_instance.y[k]
 
@@ -348,5 +385,89 @@ def build_model_m1_a(data: dict) -> pyo.ConcreteModel:
     model.lunch_visit_constraint = pyo.Constraint(model.K, rule=lunch_visit_rule, doc="Constraint 5.6")
     model.lunch_window_constraint = pyo.Constraint(model.K, rule=lunch_window_rule, doc="Constraint 5.6 window")
 
-    forbid_blocked_arcs(model, data)
     return model
+
+
+def _preprocess_time_windows(model: pyo.ConcreteModel, data: dict, horizon: float) -> tuple[dict, dict]:
+    """
+    Tightens individual node time windows [a_i, b_i] by iterative forward and backward
+    network reachability propagation until convergence.
+    """
+    win_a = {}
+    win_b = {}
+    latest_start = data.get('latest_start', data['earliest_start'])
+
+    for i in model.C_h:
+        h_i = float(data['earliest_start'][i])
+        win_a[i] = max(0.0, h_i - DELAY_TOLERANCE)
+        win_b[i] = h_i + DELAY_TOLERANCE
+
+    for i in model.C_w:
+        win_a[i] = float(data['earliest_start'][i])
+        win_b[i] = float(latest_start[i])
+
+    for k in model.K:
+        d = pyo.value(model.depot[k])
+        f = pyo.value(model.end[k])
+        a = pyo.value(model.lunch[k])
+        e_k = float(data['shift_start'][k - 1])
+        win_a[d] = e_k
+        win_b[d] = max(e_k, min(float(horizon), float(LUNCH_WINDOW[1])))
+        win_a[a] = float(LUNCH_WINDOW[0])
+        win_b[a] = float(LUNCH_WINDOW[1])
+        win_a[f] = e_k
+        win_b[f] = float(horizon)
+
+    distances = data['distance_matrix']
+    compatible_arcs = []
+    for (i, j, k) in model.ARCS:
+        if i in model.C and pyo.value(model.eligibility[i, k]) == 0:
+            continue
+        if j in model.C and pyo.value(model.eligibility[j, k]) == 0:
+            continue
+        if i in model.C and j in model.C and i != j and distances[i][j] == 0:
+            continue
+        step = float(pyo.value(model.service[i]) + pyo.value(model.travel_time[i, j, k]))
+        compatible_arcs.append((i, j, k, step))
+
+    changed = True
+    while changed:
+        changed = False
+        active_in = {j: [] for j in model.C}
+        active_out = {i: [] for i in model.C}
+        for (i, j, _, step) in compatible_arcs:
+            if win_a[i] + step <= win_b[j] + 1e-9:
+                if j in active_in:
+                    active_in[j].append((i, step))
+                if i in active_out:
+                    active_out[i].append((j, step))
+
+        for j in model.C:
+            if active_in[j]:
+                earliest_arrival = min(win_a[i] + step for (i, step) in active_in[j])
+                new_a = max(win_a[j], min(win_b[j], earliest_arrival))
+                if new_a > win_a[j] + 1e-9:
+                    win_a[j] = new_a
+                    changed = True
+
+        for i in model.C:
+            if active_out[i]:
+                latest_departure = max(win_b[j] - step for (j, step) in active_out[i])
+                new_b = min(win_b[i], max(win_a[i], latest_departure))
+                if new_b < win_b[i] - 1e-9:
+                    win_b[i] = new_b
+                    changed = True
+
+    return win_a, win_b
+
+
+def _fix_time_infeasible_arcs(model: pyo.ConcreteModel) -> None:
+    """Fixes x_{ijk} = 0 on arcs whose earliest arrival exceeds the destination's latest start."""
+    for (i, j, k) in model.ARCS:
+        if model.x[i, j, k].fixed:
+            continue
+        earliest_arrival = (pyo.value(model.window_start[i])
+                            + pyo.value(model.service[i])
+                            + pyo.value(model.travel_time[i, j, k]))
+        if earliest_arrival > pyo.value(model.window_end[j]) + 1e-9:
+            model.x[i, j, k].fix(0)
