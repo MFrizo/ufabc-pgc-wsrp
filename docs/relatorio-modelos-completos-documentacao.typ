@@ -62,7 +62,7 @@ Cada corretor que trabalha sai da própria casa, faz uma pausa de almoço de uma
 
 O modelo otimiza o começo do dia. Rodá-lo de novo a partir da posição atual dos corretores, quando as visitas mudam, fica com quem chama o modelo. O modelo em si é estático.
 
-A configuração padrão de instância é `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, velocidade `NORMAL_SPEED`, `start_at_homes = True`, almoço $(180, 360, 60)$ e `max_day_length = 720`. A semente padrão do M1 é 8. Por padrão toda visita está marcada (`fixed_ratio = 1.0`), mas `fixed_ratio` (ou `--fixed-ratio` em `main.py`) pode assumir qualquer valor em $[0, 1]$ para repartir os imóveis entre visitas marcadas ($C_h$) e visitas flexíveis ($C_w$). M2 e M3 permanecem em `STRICT_TIME_MODELS` e marcam todas as visitas.
+A configuração padrão de instância é `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, velocidade `NORMAL_SPEED`, `start_at_homes = True`, almoço $(180, 360, 60)$ e `max_day_length = 720`. A semente padrão do M1 é 8. Por padrão toda visita está marcada (`fixed_ratio = 1.0`), mas `fixed_ratio` (ou `--fixed-ratio` em `main.py`) pode assumir qualquer valor em $[0, 1]$ em todos os modelos completos (M1, M1.a, M2, M2.a, M3 e M3.a) para repartir os imóveis entre visitas marcadas ($C_h$) e visitas flexíveis ($C_w$).
 
 == Conjuntos
 
@@ -281,7 +281,7 @@ O M2 é o HC-DOMDVRPTW-SD: a mesma família de roteamento do M1, com a jornada d
 
 Cada corretor que trabalha tem o próprio turno da manhã, da casa até o lugar que escolheu para o almoço, e o próprio turno da tarde, desse lugar de volta para casa. Nenhuma visita pode terminar depois do fim do seu turno. O corretor de folga não trabalha. As visitas podem começar até 10 minutos antes ou depois. O objetivo é o combustível que os corretores pagam. O corretor é pago quando um negócio se fecha, então um minuto do tempo dele não tem preço. O atraso e o maior tempo em que um corretor que trabalha fica fora só separam planos com o mesmo combustível. O combustível inclui a viagem da última visita de cada turno até o destino desse turno.
 
-Como no M1, o modelo otimiza o começo do dia. A configuração traz `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, `NORMAL_SPEED`, `days_off = 1` e `split_shifts = True`. Toda visita está marcada.
+Como no M1, o modelo otimiza o começo do dia. A configuração traz `num_brokers = 3`, `fixed_ratio = 1.0`, `service_time_variation = 30`, `NORMAL_SPEED`, `days_off = 1` e `split_shifts = True`. Por padrão toda visita está marcada (`fixed_ratio = 1.0`), podendo variar em $[0, 1]$ via `--fixed-ratio` (separando visitas marcadas $C_h$ e flexíveis $C_w$).
 
 == Conjuntos
 
@@ -289,11 +289,13 @@ Cada turno de um corretor que trabalha é uma rota $r$. O turno da manhã, rótu
 
 #figure(
   table(
-    columns: (2.4cm, 2.6cm, 1fr),
+    columns: (2.8cm, 2.6cm, 1fr),
     table.header([Símbolo], [Pyomo], [Definição]),
     [$K = {1, dots, m}$], [`model.K`], [Corretores],
     [$R$], [`model.R`], [Turnos, dois por corretor que trabalha],
     [$C = {1, dots, n}$], [`model.C`], [Imóveis a visitar],
+    [$C_h subset.eq C$], [`model.C_h`], [Visitas marcadas (`fixed_visits`), com início $h_i$],
+    [$C_w = C backslash C_h$], [`model.C_w`], [Visitas flexíveis, com janela $[e_i, l_i]$],
     [$D = {d_r}$], [`model.D`], [Origem do turno $r$, $d_r = n + r$],
     [$F = {f_r}$], [`model.F`], [Fim virtual do turno, $f_r = n + |R| + r$],
     [$V = C union D union F$], [`model.V`], [Todos os nós],
@@ -321,7 +323,8 @@ $
     [$c^r_(i j)$], [`model.distance`], [Distância do arco $(i, j, r)$],
     [$t^r_(i j)$], [`model.travel_time`], [Tempo de viagem do arco],
     [$s_i$], [`model.service`], [Duração no nó $i$; 0 na origem e no fim],
-    [$h_i$], [`model.scheduled`], [Início marcado da visita],
+    [$h_i$], [`model.scheduled`], [Início marcado da visita $i in C_h$],
+    [$e_i, l_i$], [`model.earliest`, `latest`], [Janela de início da visita flexível $i in C_w$],
     [$tau$], [`model.tolerance`], [Tolerância de 10 minutos],
     [$E_r$, $L_r$], [`model.shift_start`, `shift_end`], [Início e fim rígido do turno $r$],
     [$P_(i r)$], [`model.eligibility`], [1 se o corretor do turno pode visitar $i$],
@@ -358,11 +361,11 @@ Sem pesos informados, cada minuto de atraso e cada minuto do dia mais longo, jun
 
 == Variáveis e objetivo
 
-Além dos arcos $x_(i j r)$ e dos inícios $w_i$, o M2 tem o atraso $delta_i$, a duração $sigma_r$ em que o corretor fica fora no turno $r$ (da saída de $d_r$ até a chegada em $f_r$), a carga $omega_k$ do corretor (soma das durações dos turnos dele; a folga vale 0) e $Omega$, a maior carga entre os corretores que trabalham.
+Além dos arcos $x_(i j r)$ e dos inícios $w_i$, o M2 tem o atraso $delta_i$ (fixado em $0$ para $i in C_w$), a duração $sigma_r$ em que o corretor fica fora no turno $r$ (da saída de $d_r$ até a chegada em $f_r$), a carga $omega_k$ do corretor (soma das durações dos turnos dele; a folga vale 0) e $Omega$, a maior carga entre os corretores que trabalham.
 
 $
 min thin alpha sum_((i, j, r) in cal(A)) c^r_(i j) thin x_(i j r)
-+ W_"atraso" sum_(i in C) delta_i
++ W_"atraso" sum_(i in C_h) delta_i
 + W_"justo" thin Omega
 $
 
@@ -380,7 +383,7 @@ $
 
 * (6) Fluxo de tempo,* com Big-M, como no M1.
 
-* (7) Janelas flexíveis,* as mesmas do M1: no máximo $tau$ minutos antes, atraso limitado por $tau$.
+* (7a) Janelas brandas das visitas marcadas ($i in C_h$)* e *(7b) Janelas das visitas flexíveis ($i in C_w$),* idênticas às do M1.
 
 * (8) Limites rígidos do turno.* O turno não sai da origem antes de $E_r$, e a última visita termina até $L_r$, tanto no relógio quanto na soma de serviços e viagens até imóveis:
 
@@ -419,9 +422,29 @@ Não há minimização de frota, hora extra nem limite rígido de 12 horas. Os t
 
 A justiça é a medida min-max de Matl, Hartl e Vidal (2018): $Omega$ é o maior tempo em que um corretor que trabalha fica fora. Com os pesos padrão ela só separa planos de mesmo combustível, porque um minuto desse dia não tem preço. Ela não eleva de propósito o dia mais leve.
 
+== M2.a, reformulação sem Big-M global
+
+O M2.a (`build_model_m2_a`, em `src/models/model_2_a.py`) mantém exatamente o conjunto viável e a função objetivo do M2 para qualquer `fixed_ratio`, eliminando a constante global $M$ das restrições (6), (8) e (9):
+
+1. *Pré-processamento das janelas $[a_i, b_i]$ entre turnos $r in R$:* propaga iterativamente a alcançabilidade para frente e para trás respeitando $L_r - s_i$ em cada turno elegível, estreita os limites superiores $b_(d_r)$ e $b_(f_r)$ das origens e destinos de turno, e fixa em zero todo arco $(i, j, r)$ com $a_i + s_i > L_r$ ou $a_i + s_i + t^r_(i j) > b_j$.
+
+2. *Coeficientes $M^r_(i j) = max(0, b_i + s_i + t^r_(i j) - a_j)$ agregados entre turnos e limites levantados de Desrochers e Laporte (1991):*
+
+$ w_i - w_j + sum_(r in R) M^r_(i j) thin x_(i j r) <= b_i - a_j quad forall i, j in C, i != j $
+
+$ w_i >= a_i + sum_((j, i, r) in cal(A)) max(0, a_j + s_j + t^r_(j i) - a_i) thin x_(j i r) quad forall i in C $
+
+$ w_i <= b_i - sum_((i, j, r) in cal(A)) max(0, b_i - min(L_r - s_i, b_j - s_i - t^r_(i j))) thin x_(i j r) quad forall i in C $
+
+3. *Fim rígido de turno levantado por imóvel e duração de turno fortalecida:* substitui as $|C| times |R|$ linhas de fim de turno por uma única desigualdade levantada por imóvel e acopla $sigma_r$ a $M^"span"_r = max(0, b_(f_r) - a_(d_r))$ e a um limite inferior linear sem Big-M:
+
+$ w_i + sum_(r in R) max(0, b_i + s_i - L_r) sum_(j : (i, j, r) in cal(A)) x_(i j r) <= b_i quad forall i in C $
+
+$ sigma_r >= w_(f_r) - w_(d_r) - M^"span"_r (1 - sum_(j in C) x_(d_r j r)), quad sigma_r >= sum_((i, j) : (i, j, r) in cal(A)) (s_i + t^r_(i j)) thin x_(i j r) quad forall r in R $
+
 = M3 — frente entre a agência e os corretores
 
-O construtor é `build_model_m3` e a frente é `pareto_front`, ambos em `src/models/model_3.py`. A instância é a do M1 mais `days_off = 1`. Toda visita está marcada.
+O construtor é `build_model_m3` e a frente é `pareto_front`, ambos em `src/models/model_3.py`. A instância é a do M1 mais `days_off = 1`, com `fixed_ratio = 1.0` por padrão e configurável em $[0, 1]$ via `--fixed-ratio`.
 
 M1 e M2 não compartilham o conjunto viável, então um par das soluções deles não é uma frente de Pareto. Uma rota legal num modelo pode ser ilegal no outro. O M3 guarda as regras de que nenhum dos lados abre mão e transforma em objetivo as preferências de cada lado.
 
@@ -487,20 +510,36 @@ A menor frota é o lado da agência neste modelo: menos corretores, com tempo de
 
 Escolher um plano é outra decisão. A frente é o conjunto de trocas. Três escolhas usuais são o ponto de compromisso (o mais próximo do ponto ideal, depois de normalizar), o joelho (onde uma perda pequena de um lado deixa de comprar muito do outro) e a barganha de Nash (o produto do ganho de cada lado sobre o seu pior resultado). O M3 devolve a frente e não escolhe.
 
+== M3.a, reformulação sem Big-M global
+
+O M3.a (`build_model_m3_a` e `pareto_front`, em `src/models/model_3_a.py`) constrói as restrições de interseção de turno sobre o poliedro fortalecido do M1.a (herdando as janelas reduzidas $[a_i, b_i]$, os coeficientes $M^k_(i j)$ por arco e as desigualdades levantadas de Desrochers e Laporte) e remove por completo a constante global $M$ das restrições (11) e (12):
+
+1. *Constantes exatas de ativação por corretor e turno* a partir de $[a_(d_k), b_(d_k)]$, $[a_(f_k), b_(f_k)]$ e $[E_(k s), L_(k s)]$, com $Delta_(k s) = L_(k s) - E_(k s)$:
+
+$ M^"reach+"_(k s) = max(0, b_(f_k) - E_(k s)), quad M^"reach-"_(k s) = max(0, E_(k s) - a_(f_k)) $
+
+$ M^"start+"_(k s) = max(0, b_(d_k) - L_(k s)), quad M^"start-"_(k s) = max(0, L_(k s) - a_(d_k)) $
+
+2. *Interseção e tempo fora do turno sem Big-M global:* impondo $o_(k s) <= Delta_(k s) thin y_k$ e o limite inferior linear $w_(f_k) - w_(d_k) >= sum_((i, j) : (i, j, k) in cal(A)) (s_i + t^k_(i j)) thin x_(i j k)$, as desigualdades de sobreposição e de tempo fora do turno dispensam qualquer termo $M(1 - y_k)$:
+
+$ o_(k s) <= w_(f_k) - w_(d_k), quad u_k >= w_(f_k) - w_(d_k) - sum_s o_(k s) quad forall k in K_"trabalha" $
+
+3. *Poda de pares de almoço inviáveis no tempo:* toda variável $z_(i j k)$ cujo arco de entrada $x_(i, a_k, k)$ ou saída $x_(a_k, j, k)$ foi fixado em zero no M1.a, ou tal que $a_i + s_i + s_(a_k) + t^k_(i j) > b_j$, é fixada em $z_(i j k) = 0$.
+
 = Gerador de instâncias
 
-Os três modelos leem a mesma função, `generate_wsrp_instance`, em `src/core/data_generator.py`. Uma chamada monta a instância inteira. Cada modelo usa só as chaves de que precisa. Cada recurso sorteia no próprio fluxo, derivado da semente: o grafo usa a semente pura, e janelas, designações, durações, casas, pontos de almoço, turnos e frota automática usam `default_rng([semente, fluxo])`. Acrescentar um recurso não desloca os números dos anteriores.
+Os modelos leem a mesma função, `generate_wsrp_instance`, em `src/core/data_generator.py`. Uma chamada monta a instância inteira. Cada modelo usa só as chaves de que precisa. Cada recurso sorteia no próprio fluxo, derivado da semente: o grafo usa a semente pura, e janelas, designações, durações, casas, pontos de almoço, turnos e frota automática usam `default_rng([semente, fluxo])`. Acrescentar um recurso não desloca os números dos anteriores.
 
-Uma instância real não sorteia os imóveis nesse mapa. `instance_from_catalog`, em `src/core/listings.py`, filtra o catálogo `data/real.csv` pela cidade e, se houver, pelo bairro, e `sample_listings` tira `num_properties` linhas com `default_rng(semente)`, sem reposição. A mesma semente e o mesmo lugar devolvem os mesmos imóveis, na ordem do sorteio. Por isso M1, M1.a, M2 e M3, com a mesma semente, a mesma cidade e o mesmo número de imóveis, visitam as mesmas casas. O que muda é a agenda e, no M2, o encaixe nos turnos.
+Uma instância real não sorteia os imóveis nesse mapa. `instance_from_catalog`, em `src/core/listings.py`, filtra o catálogo `data/real.csv` pela cidade e, se houver, pelo bairro, e `sample_listings` tira `num_properties` linhas com `default_rng(semente)`, sem reposição. A mesma semente e o mesmo lugar devolvem os mesmos imóveis, na ordem do sorteio. Por isso M1, M1.a, M2, M2.a, M3 e M3.a, com a mesma semente, a mesma cidade e o mesmo número de imóveis, visitam as mesmas casas. O que muda é a agenda e, no M2 e M2.a, o encaixe nos turnos.
 
 == O que cada modelo pede ao gerador
 
 #figure(
   table(
     columns: (2.2cm, 1fr, 1fr, 1fr),
-    table.header([Ajuste], [M1], [M2], [M3]),
+    table.header([Ajuste], [M1 / M1.a], [M2 / M2.a], [M3 / M3.a]),
     [Corretores], [3], [3, um de folga], [3, um de folga nos dados de turno],
-    [Visitas marcadas], [todas], [todas], [todas],
+    [Visitas marcadas], [todas por padrão (`fixed_ratio = 1.0`)], [todas por padrão (`fixed_ratio = 1.0`)], [todas por padrão (`fixed_ratio = 1.0`)],
     [Duração da visita], [pela área, de 30 a 90 min], [idem], [idem],
     [Velocidade], [2 unidades/min], [2 unidades/min], [2 unidades/min],
     [Saída], [da própria casa], [da casa na manhã e do almoço na tarde], [da própria casa],
@@ -518,13 +557,13 @@ A duração de uma visita real não é sorteada. Ela cresce em linha com a área
 
 As janelas nascem de uma agenda de referência que deixa a instância factível quando a carga horária cabe na jornada dos corretores. Uma permutação dos imóveis é repartida entre os corretores que trabalham. Dentro do tempo livre de cada um, o início de cada visita segue uma uniforme contínua, com folgas ociosas espalhadas entre as visitas.
 
-No M1 e no M3 a agenda não recebe os turnos. O dia de cada corretor é partido ao meio para o almoço: a primeira metade vai antes da pausa, ou menos visitas se elas não terminam até o início mais tarde do almoço (14h), e o resto vai depois. O horizonte é estendido até caber o corretor mais carregado. No M2 a agenda recebe os turnos: a manhã é feita a partir de casa e a tarde a partir do ponto de almoço, alocando as visitas que cabem nos turnos de cada corretor ativo (com um dos três corretores em regime de folga).
+No M1, M1.a, M3 e M3.a a agenda não recebe os turnos. O dia de cada corretor é partido ao meio para o almoço: a primeira metade vai antes da pausa, ou menos visitas se elas não terminam até o início mais tarde do almoço (14h), e o resto vai depois. O horizonte é estendido até caber o corretor mais carregado. No M2 e M2.a a agenda recebe os turnos: a manhã é feita a partir de casa e a tarde a partir do ponto de almoço, alocando as visitas que cabem nos turnos de cada corretor ativo (com um dos três corretores em regime de folga).
 
 No comportamento original do gerador, quando as visitas extrapolavam o limite de 720 minutos ou não cabiam nos turnos dos corretores, a rotina interrompia preventivamente a execução disparando um erro em Python (`ValueError`). Com a implementação das restrições lineares aditivas de duração de rota e frota e o fortalecimento das restrições de fluxo temporal MTZ, o gerador passou a adotar `raise_on_fit_failure = false` por padrão. Sob essa configuração, instâncias sobrecarregadas recebem o sinalizador `schedule_overflow = true`, emitem aviso informativo em log e chegam diretamente ao modelo matemático; o pré-resolvedor (presolve) do Gurobi detecta e comprova a impossibilidade matemática em fração de segundo (0 nós explorados), eliminando a necessidade de filtros manuais na geração.
 
 No caso do dimensionamento automático de frota (`--brokers auto`), a busca em `_auto_fleet_instance` inspeciona explicitamente a flag `schedule_overflow` e a duração máxima do dia para cada tamanho candidato, garantindo que o menor número de corretores viável (`schedule_brokers`) seja incrementado até que toda a carga de visitas caiba de forma factível, antes de sortear o tamanho final da frota.
 
-Depois da agenda, a parcela `fixed_ratio` das visitas fica com início fixo igual ao da referência. As outras podem começar em qualquer instante que ainda as termine dentro do horizonte. M2 e M3 forçam a parcela em 1 (`STRICT_TIME_MODELS`). M1 e M1.a aceitam qualquer `fixed_ratio` em $[0, 1]$, com padrão 1,0 em `INSTANCE_SETTINGS`. A agenda do M1 e a do M1.a coincidem quando a mesma parcela é usada: o que muda entre os dois é apenas a formulação matemática de propagação de tempo e eliminação de subciclos.
+Depois da agenda, a parcela `fixed_ratio` das visitas fica com início fixo igual ao da referência. As outras podem começar em qualquer instante que ainda as termine dentro do horizonte. Todos os modelos completos (M1, M1.a, M2, M2.a, M3 e M3.a) aceitam qualquer `fixed_ratio` em $[0, 1]$, com padrão 1,0 em `INSTANCE_SETTINGS`. As agendas de M1/M1.a, M2/M2.a e M3/M3.a coincidem par a par quando a mesma parcela é usada: o que muda entre cada modelo e sua versão `.a` é apenas a formulação matemática sem Big-M global.
 
 == Distâncias na instância real de São Paulo
 
@@ -630,7 +669,7 @@ O nome dinâmico nos três títulos não significa reotimização dentro do MILP
 
 = Referências citadas nas notas
 
-As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m2.md` e `m3.md`. As que este texto nomeia são:
+As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m2.md`, `m2.a.md`, `m3.md` e `m3.a.md`. As que este texto nomeia são:
 
 - Ballou, Rahardja e Sakai (2002), fatores de circuidade.
 - Bektaş e Laporte (2011), problema de roteamento com poluição.
