@@ -63,7 +63,12 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
             - 'home_travel_times' / 'lunch_spot_travel_times' (list): Travel time from the home and
               from the lunch spot of each broker to each node, in its first (and only) period.
             - 'service_times' (list): Duration s_i of the visit at every property.
-            - 'earliest_start' (list): Scheduled start h_i of the visit at every property.
+            - 'earliest_start' (list): Scheduled start h_i of a booked visit, or earliest start
+              e_i of a flexible visit.
+            - 'latest_start' (list, optional): Latest start l_i of a flexible visit. Absent,
+              defaults to 'earliest_start' (all visits booked).
+            - 'fixed_visits' (list, optional): Properties with a booked time (C_h). Absent,
+              every property 1..n is treated as booked (fixed_ratio = 1.0).
             - 'assigned_broker' (list): Broker already assigned to each property, 0 if none.
             - 'fuel_cost' (float, optional): Reais per map unit of distance. Absent, the Polo
               ethanol cost above.
@@ -77,6 +82,8 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     model = pyo.ConcreteModel(name="WSRP_M2_HC_DOMDVRPTW_SD")
 
     num_properties = data['num_nodes'] - 1
+    fixed_visits = sorted(data.get('fixed_visits', range(1, num_properties + 1)))
+    latest_start = data.get('latest_start', data['earliest_start'])
 
     # Each shift t_k of a broker who works is a route: the morning (A) goes from his home
     # to his lunch spot, the afternoon (B) from his lunch spot back home
@@ -95,8 +102,11 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     # R: Set of the shifts t_k of all brokers, one route each
     model.R = pyo.Set(initialize=range(1, num_routes + 1), doc="Shifts t_k")
 
-    # C = {1, ..., n}: Set of properties to be visited
+    # C = {1, ..., n}: Set of properties to be visited (partitioned into booked C_h and flexible C_w)
     model.C = pyo.Set(initialize=range(1, num_properties + 1), doc="Properties")
+    model.C_h = pyo.Set(initialize=fixed_visits, within=model.C, doc="Booked visits")
+    model.C_w = pyo.Set(initialize=[i for i in model.C if i not in model.C_h], within=model.C,
+                        doc="Flexible visits")
 
     # D, F: Origin (d_tk) and virtual end (f_tk) of each shift
     def depot_rule(model_instance, r):
@@ -163,11 +173,13 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
 
     model.service = pyo.Param(model.V, initialize=service_rule, doc="Service time s_i")
 
-    # h_i: Scheduled start of the visit at property i
-    def scheduled_rule(model_instance, i):
-        return data['earliest_start'][i]
+    # h_i: Scheduled start of the booked visit at property i in C_h
+    model.scheduled = pyo.Param(model.C_h, initialize=lambda m, i: data['earliest_start'][i],
+                                doc="Scheduled start h_i")
 
-    model.scheduled = pyo.Param(model.C, initialize=scheduled_rule, doc="Scheduled start h_i")
+    # [e_i, l_i]: Day window of a flexible visit i in C_w
+    model.earliest = pyo.Param(model.C_w, initialize=lambda m, i: data['earliest_start'][i], doc="Earliest start e_i")
+    model.latest = pyo.Param(model.C_w, initialize=lambda m, i: latest_start[i], doc="Latest start l_i")
 
     # tol: Max minutes a visit starts before or after its scheduled time
     model.tolerance = pyo.Param(initialize=DELAY_TOLERANCE, doc="Tolerance tol")
@@ -184,13 +196,14 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     model.eligibility = pyo.Param(model.C, model.R, initialize=eligibility_rule, doc="Compatibility P_itk")
 
     # H: No start time of an optimal schedule goes past the arrival at the latest destination
-    horizon = (max(max(pyo.value(model.shift_end[r]) for r in model.R),
-                   max(data['earliest_start'][i] + DELAY_TOLERANCE + data['service_times'][i] for i in model.C))
-               + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
+    horizon = (max([pyo.value(model.shift_end[r]) for r in model.R]
+                   + [data['earliest_start'][i] + DELAY_TOLERANCE + data['service_times'][i] for i in model.C_h]
+                   + [latest_start[i] + data['service_times'][i] for i in model.C_w])
+               + max((pyo.value(model.travel_time[arc]) for arc in model.ARCS), default=0.0))
 
     # M: Big-M constant that deactivates the time-flow and shift-end constraints when x = 0
     big_m = data.get('big_m', horizon + max(pyo.value(model.service[i]) for i in model.V)
-                     + max(pyo.value(model.travel_time[arc]) for arc in model.ARCS))
+                     + max((pyo.value(model.travel_time[arc]) for arc in model.ARCS), default=0.0))
     model.big_m = pyo.Param(initialize=big_m, doc="Big-M constant")
 
     # Fuel is reais per map unit. Delay and the longest day only break a tie: a broker is
@@ -211,8 +224,10 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     # w_i >= 0: Start time of the service (or of the trip) at node i
     model.w = pyo.Var(model.V, domain=pyo.NonNegativeReals, bounds=(0, horizon), doc="Start time")
 
-    # atraso_i >= 0: Minutes of delay of the visit at property i
+    # atraso_i >= 0: Minutes of delay of the booked visit at property i (fixed to 0 for flexible visits)
     model.delay = pyo.Var(model.C, domain=pyo.NonNegativeReals, doc="Delay atraso_i")
+    for i in model.C_w:
+        model.delay[i].fix(0)
 
     # sigma_tk >= 0: Minutes the broker is out on shift t_k, from leaving its origin to
     # arriving at its destination. A shift that does no visit contributes nothing.
@@ -231,7 +246,7 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
         """Minimize the fuel paid on the driven arcs, then delay and the longest workload as tie-breaks."""
         return (model_instance.fuel_cost * sum(model_instance.distance[arc] * model_instance.x[arc]
                                                for arc in model_instance.ARCS)
-                + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C)
+                + model_instance.delay_weight * sum(model_instance.delay[i] for i in model_instance.C_h)
                 + model_instance.fairness_weight * model_instance.max_workload)
 
     model.obj = pyo.Objective(rule=objective_rule, sense=pyo.minimize,
@@ -283,9 +298,9 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
 
     model.time_flow_constraint = pyo.Constraint(model.ARCS, rule=time_flow_rule, doc="Constraint 5.3")
 
-    # 5.4 Soft Time Windows: a visit starts at its scheduled time, at most tol minutes
-    # early or late, and the minutes late are its delay
-    # Formula: w_i >= h_i - tol, w_i <= h_i + atraso_i, atraso_i <= tol
+    # 5.4 Soft Time Windows (booked visits): a booked visit starts at its scheduled time, at
+    # most tol minutes early or late, and the minutes late are its delay
+    # Formula: w_i >= h_i - tol, w_i <= h_i + atraso_i, atraso_i <= tol (i in C_h)
     def early_start_rule(model_instance, i):
         return model_instance.w[i] >= model_instance.scheduled[i] - model_instance.tolerance
 
@@ -295,9 +310,15 @@ def build_model_m2(data: dict) -> pyo.ConcreteModel:
     def delay_tolerance_rule(model_instance, i):
         return model_instance.delay[i] <= model_instance.tolerance
 
-    model.early_start_constraint = pyo.Constraint(model.C, rule=early_start_rule, doc="Constraint 5.4 early")
-    model.soft_window_constraint = pyo.Constraint(model.C, rule=soft_window_rule, doc="Constraint 5.4")
-    model.delay_tolerance_constraint = pyo.Constraint(model.C, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
+    model.early_start_constraint = pyo.Constraint(model.C_h, rule=early_start_rule, doc="Constraint 5.4 early")
+    model.soft_window_constraint = pyo.Constraint(model.C_h, rule=soft_window_rule, doc="Constraint 5.4")
+    model.delay_tolerance_constraint = pyo.Constraint(model.C_h, rule=delay_tolerance_rule, doc="Constraint 5.4 tol")
+
+    # 5.4b Flexible Windows: a visit without a booked time may start at any time in [e_i, l_i]
+    def flexible_window_rule(model_instance, i):
+        return model_instance.earliest[i], model_instance.w[i], model_instance.latest[i]
+
+    model.flexible_window_constraint = pyo.Constraint(model.C_w, rule=flexible_window_rule, doc="Constraint 5.4b")
 
     # 5.5 Hard Shift Limits: a shift starts when the broker leaves its origin, not before its
     # start, and its last visit ends by the end of the shift — both on the clock and as the

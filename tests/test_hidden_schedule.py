@@ -61,7 +61,9 @@ class HiddenScheduleTest(unittest.TestCase):
             ('m1', 'route_duration_constraint'),
             ('m1.a', 'route_duration_constraint'),
             ('m2', 'shift_duration_constraint'),
+            ('m2.a', 'shift_duration_constraint'),
             ('m3', 'route_duration_constraint'),
+            ('m3.a', 'route_duration_constraint'),
         ]:
             with self.subTest(model=variant):
                 settings = dict(INSTANCE_SETTINGS[variant])

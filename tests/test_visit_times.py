@@ -87,8 +87,8 @@ class VisitTimesTest(unittest.TestCase):
             self.assertEqual(data, load_instance("synthetic", model, num_properties=6, random_seed=3))
 
     def test_models_with_time_windows_solve_a_mixed_instance(self):
-        for model in ('m0.1', 'm0.2', 'm0.3', 'm0.4', 'm0.5', 'm0.6', 'm1', 'm1.a'):
-            data = load_instance("synthetic", model, num_properties=6, random_seed=3, fixed_ratio=0.5)
+        for model in ('m0.1', 'm0.2', 'm0.3', 'm0.4', 'm0.5', 'm0.6', 'm1', 'm1.a', 'm2', 'm2.a', 'm3', 'm3.a'):
+            data = load_instance("synthetic", model, num_properties=4, random_seed=3, fixed_ratio=0.5)
             _, metrics = solve_model(BUILDERS[model](data), solver_name="gurobi_direct", mip_gap=0.0, raw=True)
             self.assertEqual(metrics['termination_condition'], 'optimal', model)
 

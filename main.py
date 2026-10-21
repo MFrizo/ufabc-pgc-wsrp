@@ -15,7 +15,9 @@ Usage:
     python main.py --model m1      # Moema, 5 houses, 3 brokers, seed 8, gap 0, 30 min
     python main.py --model m1.a    # Tightened and lifted MTZ reformulation of m1
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
+    python main.py --model m2.a    # Tightened and lifted MTZ reformulation of m2
     python main.py --model m3      # Pareto front of the agency and the brokers
+    python main.py --model m3.a    # Tightened and lifted MTZ reformulation of m3
 
     python main.py --properties 12 --brokers 4    # Custom instance size
     python main.py --brokers auto    # Fleet drawn from the instance
@@ -44,7 +46,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     Main execution pipeline for local development and benchmarking.
 
     Args:
-        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0.0', 'm1', 'm1.a', 'm2', 'm3').
+        model_version (str): Model to execute, a key of src.models.BUILDERS (e.g. 'm0.0', 'm1', 'm1.a', 'm2', 'm2.a', 'm3', 'm3.a').
         num_properties (int): Number of properties to visit.
         num_brokers (Optional[Union[int, str]]): Number of brokers |K|, read from M0.2 onwards;
             m0.0 and m0.1 warn and ignore it. "auto" draws it between the fewest brokers the visits
@@ -57,8 +59,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         random_seed (Optional[int]): Seed of the instance. None runs the model's default seed,
             src.models.DEFAULT_SEEDS or DEFAULT_SEED. The series uses 8.
         fixed_ratio (Optional[float]): Share of the visits with a strict start time, from 0 to 1;
-            the others may start at any time of the day. m2 and m3 warn and ignore it. None keeps
-            the model's own setting.
+            the others may start at any time of the day. None keeps the model's own setting.
         hidden_schedule (Optional[bool]): Whether the time windows come from a hidden reference day
             that keeps the instance feasible. False draws each booked start on its own and lets the
             solver receive an instance that may be infeasible. None keeps the generator default, on.
@@ -94,11 +95,13 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     # ---------------------------------------------------------
     # PHASE 2: Mathematical Modeling (Pyomo Polyhedron)
     # ---------------------------------------------------------
-    if model_version == 'm3':
-        from src.models.model_3 import pareto_front
+    if model_version in ('m3', 'm3.a'):
+        from src.models.model_3 import pareto_front as pareto_front_m3
+        from src.models.model_3_a import pareto_front as pareto_front_m3_a
 
         project_logger.info("PHASE 2: Pareto front, one MILP per fleet size...")
-        front = pareto_front(data_payload)
+        front_fn = pareto_front_m3_a if model_version == 'm3.a' else pareto_front_m3
+        front = front_fn(data_payload)
         if not front:
             project_logger.error("No feasible fleet size.")
             return
@@ -171,8 +174,7 @@ if __name__ == "__main__":
     parser.add_argument('--fixed-ratio', type=_ratio, default=None,
                         help="Share of the visits with a strict start time, from 0 to 1, e.g. 0.3 for 30%%; the "
                              "others may start at any time of the day. Strict times follow a continuous uniform "
-                             "distribution over each broker's free time. m2 and m3 book every visit, so they warn "
-                             "and ignore it (default: the model's own setting)")
+                             "distribution over each broker's free time (default: the model's own setting)")
     parser.add_argument('--no-hidden-schedule', action='store_true',
                         help="Draw each booked start on its own, without the feasible reference day, "
                              "so the solver may receive an infeasible instance (default: the hidden schedule is on)")

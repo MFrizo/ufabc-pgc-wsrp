@@ -13,10 +13,12 @@ from src.models.model_0_6 import build_model_m0_6
 from src.models.model_1 import build_model_m1, LUNCH_DURATION, LUNCH_WINDOW, MAX_DAY_LENGTH
 from src.models.model_1_a import build_model_m1_a
 from src.models.model_2 import build_model_m2
+from src.models.model_2_a import build_model_m2_a
 from src.models.model_3 import build_model_m3
+from src.models.model_3_a import build_model_m3_a
 
 # m0.0 to m0.6 are the sub-steps that build up to m1, the first complete model.
-# m1.a is m1 with tightened and lifted MTZ time-flow constraints (no global Big-M).
+# m1.a, m2.a, and m3.a are the tightened and lifted MTZ reformulations of m1, m2, and m3 (no global Big-M).
 # m2 is broker-focused. m3 is the Pareto front between the agency's objective and the brokers'.
 BUILDERS = {
     'm0.0': build_model_m0_0,  # Sub-step: TSP
@@ -29,14 +31,16 @@ BUILDERS = {
     'm1': build_model_m1,  # First complete model: MO-DOMDVRPTW-SD
     'm1.a': build_model_m1_a,  # Tightened & lifted MTZ reformulation of m1
     'm2': build_model_m2,  # Broker-focused model: HC-DOMDVRPTW-SD
+    'm2.a': build_model_m2_a,  # Tightened & lifted MTZ reformulation of m2
     'm3': build_model_m3,  # Pareto front of the agency and the brokers
+    'm3.a': build_model_m3_a,  # Tightened & lifted MTZ reformulation of m3
 }
 
 # Models that route a single broker, so they ignore a number of brokers
 SINGLE_BROKER_MODELS = ('m0.0', 'm0.1')
 
-# Models that book every visit at its earliest start h_i, so every visit has a strict time
-STRICT_TIME_MODELS = ('m2', 'm3')
+# Models that book every visit at its earliest start h_i and ignore fixed_ratio
+STRICT_TIME_MODELS = ()
 
 # Rush hours from 08:00 to 10:00 and from 17:00 at half the speed of the rest of the day.
 # Synthetic trips and drawn points use these speeds. A cached real street duration is
@@ -47,11 +51,14 @@ RUSH_HOURS = [(0, 1.0), (120, 2.0), (540, 1.0)]
 NORMAL_SPEED = [(0, 2.0)]
 
 # Generator settings each model runs with, on top of generate_wsrp_instance's defaults.
-# M1 and M1.a accept any fixed_ratio in [0, 1]; their default books every visit (1.0).
+# Complete models (M1, M1.a, M2, M2.a, M3, M3.a) accept any fixed_ratio in [0, 1]; their default books every visit (1.0).
 _M1_SETTINGS = {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
                 'speed_profile': NORMAL_SPEED, 'start_at_homes': True,
                 'lunch_break': (*LUNCH_WINDOW, LUNCH_DURATION),
                 'max_day_length': MAX_DAY_LENGTH}  # own homes, lunch, 08:00 to 17:00 days of up to 12 hours
+_M2_SETTINGS = {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
+                'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True}  # own shifts, one broker off
+_M3_SETTINGS = {**_M1_SETTINGS, 'days_off': 1}  # M1's day, plus one broker off, for the front
 INSTANCE_SETTINGS = {
     'm0.0': {},
     'm0.1': {},
@@ -64,9 +71,10 @@ INSTANCE_SETTINGS = {
            'speed_profile': RUSH_HOURS},  # more brokers than needed, to minimize the fleet
     'm1': _M1_SETTINGS,
     'm1.a': _M1_SETTINGS,
-    'm2': {'num_brokers': 3, 'fixed_ratio': 1.0, 'service_time_variation': 30,
-           'speed_profile': NORMAL_SPEED, 'days_off': 1, 'split_shifts': True},  # own shifts, one broker off
-    'm3': {**_M1_SETTINGS, 'days_off': 1},  # M1's day, plus one broker off, for the front
+    'm2': _M2_SETTINGS,
+    'm2.a': _M2_SETTINGS,
+    'm3': _M3_SETTINGS,
+    'm3.a': _M3_SETTINGS,
 }
 
 # Seed of each model's default run
