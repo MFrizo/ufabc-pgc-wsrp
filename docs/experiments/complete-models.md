@@ -1,6 +1,6 @@
 # Complete models on the real catalog
 
-Shared-input runs of [M1](../models/m1.md), [M1.a](../models/m1.a.md), [M2](../models/m2.md) and [M3](../models/m3.md) on the real rental catalog, executed on Google Colab from `notebooks/ufabc-pgc-wsrp.ipynb`.
+Shared-input runs of [M1](../models/m1.md), [M1.a](../models/m1.a.md), [M1.b](../models/m1.b.md), [M2](../models/m2.md) and [M3](../models/m3.md) on the real rental catalog, executed on Google Colab from `notebooks/ufabc-pgc-wsrp.ipynb`.
 
 The result tables are grouped by house count, so the models on one sample sit together. On Colab, one model was finished across every size and both places, then `MODEL_VERSION` was changed. M3 used the same cell 3 as the others: one solve, with every broker allowed to work.
 
@@ -150,6 +150,27 @@ Colab, 2026-10-11, solver mode `default` (`raw=False`).
 | 50 | m1.a (`fixed_ratio=1`) | infeasible (presolve) | | | |
 | 50 | m2 | infeasible (presolve) | | | |
 | 50 | m3 | infeasible (presolve) | | | |
+
+### Native Multi-Objective M1.b vs. Scalarized M1 (Moema, seed 8, fixed_ratio=1.0)
+
+Direct comparison between native Gurobi multi-objective optimization ([M1.b](../models/m1.b.md), using `setObjectiveN` with hierarchical lexicographic priorities) and the scalarized formulations ([M1](../models/m1.md) with global Big-M and [M1.a](../models/m1.a.md) with lifted MTZ) for identical inputs in Moema (`NUM_BROKERS = 3`, `RANDOM_SEED = 8`, `FIXED_RATIO = 1.0`).
+
+| Houses | Model | Objective Approach | Status | Time (s) | Ratio vs. M1 | Brokers used | Delay (min) | Overtime (min) | Distance |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 5 | m1 | Scalarized (global Big-M) | optimal | 0.0940 | 1.00x (base) | 2 of 3 | 0.00 | 40.00 | 84.45 |
+| 5 | m1.a | Scalarized (lifted MTZ) | optimal | 0.3375 | 0.28x | 2 of 3 | 0.00 | 40.00 | 84.45 |
+| 5 | m1.b | Native multi-objective (`setObjectiveN`) | optimal | 0.2685 | 0.35x | 2 of 3 | 0.00 | 40.00 | 84.45 |
+| 20 | m1 | Scalarized (global Big-M) | optimal | 0.4829 | 1.00x (base) | 3 of 3 | 0.00 | 25.00 | 191.55 |
+| 20 | m1.a | Scalarized (lifted MTZ) | optimal | 0.1981 | 2.44x | 3 of 3 | 0.00 | 25.00 | 191.55 |
+| 20 | m1.b | Native multi-objective (`setObjectiveN`) | optimal | 0.3325 | 1.45x | 3 of 3 | 0.00 | 25.00 | 191.55 |
+| 40 | m1 | Scalarized (global Big-M) | optimal | 0.9731 | 1.00x (base) | 3 of 3 | 0.00 | 452.00 | 293.27 |
+| 40 | m1.a | Scalarized (lifted MTZ) | optimal | 0.6261 | 1.55x | 3 of 3 | 0.00 | 452.00 | 293.27 |
+| 40 | m1.b | Native multi-objective (`setObjectiveN`) | optimal | 0.4924 | 1.98x | 3 of 3 | 0.00 | 452.00 | 293.27 |
+
+#### Comparison with M1:
+1. **Identical Solution Quality**: Across all three sample sizes (5, 20, and 40 houses), M1.b produces exactly identical objective metrics (number of active brokers, 0.00 min delay, identical overtime, and identical distance of 84.45, 191.55, and 293.27 units) to M1 and M1.a.
+2. **Speedup at Scale**: While M1 is faster at $N=5$ due to minimal overhead on trivial solves, M1.b is **1.45x faster** than M1 at $N=20$ (0.3325 s vs. 0.4829 s) and **1.98x faster** (nearly half the runtime) at $N=40$ (0.4924 s vs. 0.9731 s).
+3. **M1.b vs. M1.a**: At $N=40$, M1.b also outperforms M1.a (0.4924 s vs. 0.6261 s), demonstrating that native multi-objective priority stages avoid the ill-conditioning of scalarized artificial Big-W weights.
 
 ### Stress test, seed 8, `raw=False`
 

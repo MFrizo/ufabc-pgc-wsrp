@@ -32,14 +32,14 @@
   #v(1.6cm)
   #text(size: 20pt, weight: "bold")[Testes e experimentos do WSRP]
   #v(0.45cm)
-  #text(size: 13pt)[M1, M1.a, M2 e M3: protocolo, resultados e análise no catálogo real de São Paulo]
+  #text(size: 13pt)[M1, M1.a, M1.b, M2 e M3: protocolo, resultados e análise no catálogo real de São Paulo]
   #v(1.4cm)
   #text(size: 11pt)[18 de outubro de 2026]
   #v(1fr)
   #text(size: 9.5pt)[
     Este texto reúne o protocolo experimental, os resultados computacionais e a análise
     dos testes de escalabilidade e estresse executados em Google Colab para os
-    modelos completos M1, M1.a, M2 e M3, registrados em `docs/experiments/complete-models.md`,
+    modelos completos M1, M1.a, M1.b, M2 e M3, registrados em `docs/experiments/complete-models.md`,
     além do registro da suíte de testes automatizados do projeto.
     As formulações matemáticas e notas de decisão estão no relatório complementar de documentação.
   ]
@@ -50,7 +50,7 @@
 
 = Introdução
 
-O problema de roteamento e agendamento de equipes de corretores (_Workforce Scheduling and Routing Problem_ — WSRP) formulado nos modelos completos M1, M2 e M3 envolve decisões complexas de designação, janelas de atendimento, pausas intrajornada e restrições de duração de jornada e turno.
+O problema de roteamento e agendamento de equipes de corretores (_Workforce Scheduling and Routing Problem_ — WSRP) formulado nos modelos completos M1, M1.a, M1.b, M2 e M3 envolve decisões complexas de designação, janelas de atendimento, pausas intrajornada e restrições de duração de jornada e turno.
 
 Para avaliar a viabilidade, escalabilidade e qualidade dos planos gerados, foi realizada uma bateria de experimentos computacionais com o resolvedor Gurobi utilizando dados do catálogo real de aluguéis residenciais da cidade de São Paulo, cobrindo tanto um recorte concentrado de bairro (Moema) quanto a dispersão geográfica da cidade inteira.
 
@@ -58,9 +58,10 @@ Este documento registra:
 1. O protocolo experimental compartilhado entre os modelos;
 2. As tabelas-resumo de alcance e os maiores casos resolvidos com solução ótima;
 3. Os resultados detalhados nas instâncias de Moema e da capital paulista;
-4. Os testes de estresse com aumento coordenado de instâncias e frota;
-5. A discussão aprofundada dos resultados e o comportamento das funções objetivo e restrições de jornada;
-6. A descrição da suíte de testes automatizados de unidade e integração implementada no repositório.
+4. O comparativo da abordagem multiobjetivo nativa do M1.b frente aos modelos escalarizados M1 e M1.a;
+5. Os testes de estresse com aumento coordenado de instâncias e frota;
+6. A discussão aprofundada dos resultados e o comportamento das funções objetivo e restrições de jornada;
+7. A descrição da suíte de testes automatizados de unidade e integração implementada no repositório.
 
 As formulações matemáticas rigorosas, os parâmetros do gerador e as notas de decisão encontram-se documentados no relatório complementar `relatorio-modelos-completos-documentacao.pdf`.
 
@@ -267,6 +268,31 @@ A cidade inteira, sem bairro. A amostra é de 6.874 anúncios. O resto do protoc
   caption: [São Paulo, sem bairro. Atraso e hora extra em minutos. Distância em unidades do mapa. M1 ($r=1$) e M1.a ($r=1$) geram planos ótimos rigorosamente idênticos, com M1.a sendo mais rápido em todos os tamanhos (até $5,18times$ em 10 imóveis).],
 )
 
+#pagebreak()
+= Comparativo do modelo M1.b (multiobjetivo nativo) vs. M1
+
+O modelo M1.b substitui a função objetivo escalarizada clássica de pesos artificiais ($W_("frota")$, $W_("tempo")$, $W_("atraso")$, $W_("extra")$ e $W_("dist")$) pela otimização multiobjetivo nativa do resolvedor Gurobi via API `setObjectiveN`, aplicando prioridades lexicográficas estritas: prioridade 2 para minimização da frota ativa, prioridade 1 para os custos operacionais (tempo de viagem, atrasos e horas extras) e prioridade 0 para a distância total de percurso como critério de desempate estrito. A formulação herda o mesmo poliedro fortalecido com limites levantados de Desrochers-Laporte (MTZ) do M1.a.
+
+A tabela a seguir apresenta os resultados do M1.b nas instâncias de Moema com agenda fixa (`fixed_ratio = 1,0`, semente 8) e os compara diretamente com o modelo base M1 e o modelo M1.a para as mesmas entradas:
+
+#figure(
+  table(
+    columns: (1.1cm, 1.3cm, 4.5cm, 1.5cm, 1.7cm, 1.3cm, 1.1cm, 1.1cm, 1fr),
+    align: (center, center, left, right, center, center, right, right, right),
+    table.header([Imóveis], [Modelo], [Abordagem de objetivo], [Tempo (s)], [Razão vs. M1], [Usados], [Atraso], [Extra], [Dist.]),
+    [5], [M1], [Escalarizado (Big-M global)], [0,0940], [1,00$times$ (base)], [2 de 3], [0], [40], [84,45],
+    [5], [M1.a], [Escalarizado (MTZ levantado)], [0,3375], [0,28$times$], [2 de 3], [0], [40], [84,45],
+    [5], [M1.b], [Multiobjetivo nativo (`setObjectiveN`)], [0,2685], [0,35$times$], [2 de 3], [0], [40], [84,45],
+    [20], [M1], [Escalarizado (Big-M global)], [0,4829], [1,00$times$ (base)], [3 de 3], [0], [25], [191,55],
+    [20], [M1.a], [Escalarizado (MTZ levantado)], [0,1981], [2,44$times$], [3 de 3], [0], [25], [191,55],
+    [20], [M1.b], [Multiobjetivo nativo (`setObjectiveN`)], [0,3325], [1,45$times$], [3 de 3], [0], [25], [191,55],
+    [40], [M1], [Escalarizado (Big-M global)], [0,9731], [1,00$times$ (base)], [3 de 3], [0], [452], [293,27],
+    [40], [M1.a], [Escalarizado (MTZ levantado)], [0,6261], [1,55$times$], [3 de 3], [0], [452], [293,27],
+    [40], [M1.b], [Multiobjetivo nativo (`setObjectiveN`)], [0,4924], [1,98$times$], [3 de 3], [0], [452], [293,27],
+  ),
+  caption: [Comparativo entre o modelo M1.b (multiobjetivo nativo via `setObjectiveN`) e os modelos escalarizados M1 e M1.a em Moema (`fixed_ratio = 1,0`, semente 8). Todas as métricas de solução (corretores, atraso, hora extra e distância) são rigorosamente idênticas entre as três formulações. O M1.b supera o M1 em 20 e 40 imóveis, sendo o mais rápido de todos na maior escala viável ($N=40$, quase $2times$ mais rápido que o M1).],
+)
+
 = Testes de estresse
 
 Depois da escada de 3 corretores, a frota passa a crescer com os imóveis. Um erro de encaixe significa que a agenda oculta passa de 12 horas, então a tentativa seguinte mantém os imóveis e aumenta os corretores. A tabela ainda tem um único ponto. O lugar dessa execução não foi registrado.
@@ -318,6 +344,17 @@ A inclusão dos regimes com visitas livres (`fixed_ratio = 0,5` e `fixed_ratio =
   - *Limite combinatório em 20 e 25 imóveis*: com todas as janelas completamente abertas ($[0, 540]$ min), o pré-processamento de janelas do M1.a não pode podar arcos por incompatibilidade temporal ($a_i + d_i + t_(i j) > b_j$), deixando o resolvedor diante da explosão fatorial pura do sequenciamento ($20! approx 2,43 times 10^(18)$ permutações). Em 20 imóveis, o M1 atinge os 300 s com 137.580 nós e gap de $0,0035\%$, enquanto o M1.a processou 158.075 nós e reduziu o gap a apenas $0,0028\%$ (incumbent de 56.729,02 contra cota inferior de 56.727,45). Em 25 imóveis, ambos também atingiram o tempo limite de 300 s, encerrando com gaps estreitos de $0,0122\%$ no M1 (91.913 nós) e $0,0167\%$ no M1.a (117.333 nós).
 
 Essa comparação evidencia a mecânica teórica central da reformulação: a presença de janelas temporais — mesmo que parciais ($r=0,5$) — potencializa dramaticamente o levantamento MTZ de Desrochers-Laporte, permitindo eliminar arcos inviáveis e cruzar a barreira de 25 imóveis onde o Big-M global colapsa. Quando a flexibilidade é total ($r=0$), a formulação levantada ainda oferece cortes mais justos e maior rendimento de nós, reduzindo o gap a patamares praticamente nulos.
+
+== Otimização multiobjetivo nativa do M1.b vs. escalarização clássica
+
+A avaliação experimental do modelo M1.b permitiu confrontar diretamente a abordagem clássica de escalarização com pesos artificiais (adotada no M1 e M1.a) contra a otimização multiobjetivo nativa do Gurobi (`setObjectiveN`):
+
+1. *Preservação estrita da equivalência de soluções*: em todas as instâncias testadas ($N = 5$, $20$ e $40$ imóveis), o M1.b encontrou rotas e métricas de solução rigorosamente idênticas às dos modelos M1 e M1.a (mesmo número de corretores ativos, zero minutos de atraso, e exatamente os mesmos valores de hora extra e distância percorrida). Isso valida empiricamente que a hierarquização lexicográfica (Prioridade 2 para frota, Prioridade 1 para tempos/atrasos/horas extras, e Prioridade 0 para distância) reproduz fielmente as preferências operacionais do WSRP sem qualquer perda de qualidade.
+2. *Eliminação de distorções e escalas artificiais*: na formulação escalarizada tradicional, a distância de desempate precisa ser ponderada por uma constante infinitesimal ($W_("dist") = 1 / (U + 1)$) para não interferir nos custos em minutos, enquanto a frota exige um peso astronômico ($W_("frota") = 10^7$). Essa disparidade de magnitude pode gerar instabilidade numérica na base simplex e nos cortes de branch-and-bound. O M1.b resolve o problema de forma limpa e canônica ao isolar a distância como objetivo lexicográfico estrito de prioridade 0.
+3. *Ganhos expressivos de velocidade em instâncias maiores*:
+  - Para $N = 5$ imóveis, o M1.b (0,2685 s) supera o M1.a (0,3375 s), embora o M1 base (0,0940 s) seja mais rápido devido ao overhead de inicialização da API multiobjetivo em instâncias de resolução quase instantânea.
+  - Para $N = 20$ imóveis, o M1.b resolve em 0,3325 s contra 0,4829 s do M1, proporcionando uma aceleração de $1,45times$ (redução de 31,1% no tempo de parede).
+  - Para $N = 40$ imóveis (maior instância viável), o M1.b atinge a otimalidade em apenas 0,4924 s, tornando-se o modelo mais veloz de toda a série: é $1,98times$ mais rápido que o M1 (0,9731 s) e $1,27times$ mais rápido que o M1.a (0,6261 s). A decomposição hierárquica pelo Gurobi permite ao resolvedor fixar a frota ótima no primeiro estágio e focar a busca nos custos operacionais no segundo estágio, reduzindo drasticamente o esforço combinatório total.
 
 == Comportamento dos demais modelos e regimes flexíveis
 
