@@ -14,6 +14,7 @@ Usage:
     python main.py --model m0.6    # Sub-step: FSMVRPTW
     python main.py --model m1      # Moema, 5 houses, 3 brokers, seed 8, gap 0, 30 min
     python main.py --model m1.a    # Tightened and lifted MTZ reformulation of m1
+    python main.py --model m1.b    # Native Gurobi multi-objective version of m1.a (setObjectiveN)
     python main.py --model m2      # Broker-focused model: HC-DOMDVRPTW-SD
     python main.py --model m2.a    # Tightened and lifted MTZ reformulation of m2
     python main.py --model m3      # Pareto front of the agency and the brokers
@@ -38,10 +39,14 @@ from src.solvers.engine import solve_model
 from src.utils.parsers import print_results
 
 
+from src.solvers.multiobj_benchmark import compare_objectives as run_objective_benchmark
+
+
 def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = 3,
          dataset: str = "real", city: Optional[str] = "São Paulo", neighborhood: Optional[str] = "Moema",
          random_seed: Optional[int] = 8, fixed_ratio: Optional[float] = None,
-         hidden_schedule: Optional[bool] = None):
+         hidden_schedule: Optional[bool] = None, multiobj: bool = False,
+         multiobj_mode: str = "hierarchical", compare_objectives: bool = False):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -112,13 +117,19 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
                 f"overtime {point['overtime']:.1f} min")
         return
 
+    if compare_objectives:
+        project_logger.info("PHASE 2 & 3: Running objective formulation benchmark (Default vs Gurobi Multi-Objective)...")
+        run_objective_benchmark(data_payload, model_version=model_version, modes=('hierarchical', 'blended'), mip_gap=0.0)
+        return
+
     project_logger.info("PHASE 2: Building abstract MILP model...")
     abstract_model = BUILDERS[model_version](data_payload)
 
     # ---------------------------------------------------------
     # PHASE 3: Optimization Engine (Strategy Pattern)
     # ---------------------------------------------------------
-    project_logger.info("PHASE 3: Dispatching model to Gurobi engine (Absolute Optimality)...")
+    mode_label = f" (Multi-Objective {multiobj_mode})" if multiobj else ""
+    project_logger.info(f"PHASE 3: Dispatching model to Gurobi engine (Absolute Optimality{mode_label})...")
 
     # Using gurobi_direct for in-memory high performance communication
     solved_model, metrics = solve_model(
@@ -126,7 +137,9 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         solver_name='gurobi_direct',
         time_limit=1800,
         mip_gap=0.0,
-        raw=False
+        raw=False,
+        multiobj=multiobj,
+        multiobj_mode=multiobj_mode,
     )
 
     # ---------------------------------------------------------
@@ -134,7 +147,7 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     # ---------------------------------------------------------
     if metrics['solver_status'] == 'ok':
         project_logger.info(f"Optimization successfully completed in {metrics['cpu_time_seconds']}s.")
-        print_results(solved_model, elapsed_time=metrics['cpu_time_seconds'], solver_mode=metrics['solver_mode'])
+        print_results(solved_model, elapsed_time=metrics['cpu_time_seconds'], solver_mode=metrics['solver_mode'], metrics=metrics)
     else:
         project_logger.error(f"Optimization failed. Termination: {metrics['termination_condition']}")
 
@@ -186,9 +199,22 @@ if __name__ == "__main__":
     parser.add_argument('--neighborhood', default='Moema',
                         help="Neighborhood of the real listings, inside --city. An empty string samples the "
                              "whole city (default: Moema)")
+    parser.add_argument('--multiobj', action='store_true',
+                        help="Solve using Gurobi's native multi-objective optimization API (setObjectiveN) "
+                             "instead of a single scalarized objective")
+    parser.add_argument('--multiobj-mode', choices=['hierarchical', 'blended', 'lexicographic'],
+                        default='hierarchical',
+                        help="Configuration strategy for Gurobi multi-objective: 'hierarchical' (priority tiers, "
+                             "default), 'blended' (equal priority with default scalar weights), or 'lexicographic' "
+                             "(strictly sequential priorities)")
+    parser.add_argument('--compare-objectives', action='store_true',
+                        help="Run a side-by-side benchmark comparing the default scalarized objective against "
+                             "Gurobi's native multi-objective engine in hierarchical and blended modes")
     args = parser.parse_args()
     if args.dataset == 'real' and not args.city:
         parser.error("--dataset real requires --city")
     main(args.model, num_properties=args.properties, num_brokers=args.brokers, dataset=args.dataset,
          city=args.city, neighborhood=args.neighborhood, random_seed=args.seed, fixed_ratio=args.fixed_ratio,
-         hidden_schedule=False if args.no_hidden_schedule else None)
+         hidden_schedule=False if args.no_hidden_schedule else None,
+         multiobj=args.multiobj, multiobj_mode=args.multiobj_mode,
+         compare_objectives=args.compare_objectives)
