@@ -12,6 +12,7 @@ from src.models.model_0_5 import build_model_m0_5
 from src.models.model_0_6 import build_model_m0_6
 from src.models.model_1 import build_model_m1, LUNCH_DURATION, LUNCH_WINDOW, MAX_DAY_LENGTH
 from src.models.model_1_a import build_model_m1_a
+from src.models.model_1_b import build_model_m1_b
 from src.models.model_2 import build_model_m2
 from src.models.model_2_a import build_model_m2_a
 from src.models.model_3 import build_model_m3
@@ -19,6 +20,7 @@ from src.models.model_3_a import build_model_m3_a
 
 # m0.0 to m0.6 are the sub-steps that build up to m1, the first complete model.
 # m1.a, m2.a, and m3.a are the tightened and lifted MTZ reformulations of m1, m2, and m3 (no global Big-M).
+# m1.b is the native Gurobi multi-objective version of m1.a (setObjectiveN).
 # m2 is broker-focused. m3 is the Pareto front between the agency's objective and the brokers'.
 BUILDERS = {
     'm0.0': build_model_m0_0,  # Sub-step: TSP
@@ -30,6 +32,7 @@ BUILDERS = {
     'm0.6': build_model_m0_6,  # Sub-step: FSMVRPTW
     'm1': build_model_m1,  # First complete model: MO-DOMDVRPTW-SD
     'm1.a': build_model_m1_a,  # Tightened & lifted MTZ reformulation of m1
+    'm1.b': build_model_m1_b,  # Gurobi native multi-objective with lifted MTZ
     'm2': build_model_m2,  # Broker-focused model: HC-DOMDVRPTW-SD
     'm2.a': build_model_m2_a,  # Tightened & lifted MTZ reformulation of m2
     'm3': build_model_m3,  # Pareto front of the agency and the brokers
@@ -71,6 +74,7 @@ INSTANCE_SETTINGS = {
            'speed_profile': RUSH_HOURS},  # more brokers than needed, to minimize the fleet
     'm1': _M1_SETTINGS,
     'm1.a': _M1_SETTINGS,
+    'm1.b': _M1_SETTINGS,
     'm2': _M2_SETTINGS,
     'm2.a': _M2_SETTINGS,
     'm3': _M3_SETTINGS,
@@ -82,4 +86,5 @@ DEFAULT_SEED = 42
 DEFAULT_SEEDS = {
     'm1': 8,  # 2 brokers serve 5 to 7 properties; from 8 on, the third one is needed
     'm1.a': 8,  # Same default instance as M1
+    'm1.b': 8,  # Same default instance as M1
 }

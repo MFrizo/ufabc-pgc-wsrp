@@ -200,8 +200,36 @@ def print_broker_schedules(model: pyo.ConcreteModel) -> None:
     print("=" * 50 + "\n")
 
 
+def print_multiobj_summary(metrics: dict[str, Any]) -> None:
+    """
+    Prints a summary table of Gurobi multi-objective optimization results.
+
+    Args:
+        metrics (dict[str, Any]): Benchmark and solver metrics containing 'multiobj_results'.
+    """
+    multiobj_results = metrics.get('multiobj_results')
+    if not multiobj_results:
+        return
+
+    mode = metrics.get('multiobj_mode', 'hierarchical')
+    print("\n" + "=" * 62)
+    print(f"GUROBI MULTI-OBJECTIVE RESULTS ({mode.upper()})")
+    print("=" * 62)
+    print(f"{'Idx':>3} | {'Objective':<14} | {'Prio':>4} | {'Weight':>6} | {'Value':>10} | {'Unit':<10}")
+    print("-" * 62)
+    for item in multiobj_results:
+        name = item['name']
+        prio = item['priority']
+        w = item['weight']
+        val = item['value']
+        unit = item.get('unit', '')
+        print(f"{item['index']:>3} | {name:<14} | {prio:>4} | {w:>6.1f} | {val:>10.2f} | {unit:<10}")
+    print("=" * 62 + "\n")
+
+
 def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None,
-                  solver_mode: Optional[str] = None) -> None:
+                  solver_mode: Optional[str] = None,
+                  metrics: Optional[dict[str, Any]] = None) -> None:
     """
     Prints the routes of a solved model and, when it has start times, its schedule.
     The printers are picked from the components the model defines (K for brokers,
@@ -211,7 +239,11 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
         model (pyo.ConcreteModel): The solved Pyomo model.
         elapsed_time (Optional[float]): Solver execution time in seconds, printed alongside the distance.
         solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
+        metrics (Optional[dict[str, Any]]): Optional solver metrics; if multi-objective, prints breakdown.
     """
+    if metrics and metrics.get('multiobj'):
+        print_multiobj_summary(metrics)
+
     if hasattr(model, 'end'):
         print_open_routes(model, elapsed_time=elapsed_time, solver_mode=solver_mode)
         print_open_schedules(model)
