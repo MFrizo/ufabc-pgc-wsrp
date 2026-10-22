@@ -26,6 +26,8 @@ Usage:
     python main.py --neighborhood ""    # The whole city of São Paulo
     python main.py --dataset synthetic    # The generator instead of the catalog
     python main.py --no-hidden-schedule    # Booked starts drawn on their own; the instance may be infeasible
+    python main.py --model m1.a --popmusic --popmusic-r 2    # Solve via POPMUSIC matheuristic
+    python main.py --model m1.a --compare-popmusic    # Benchmark Exact MILP vs POPMUSIC
 """
 
 import argparse
@@ -40,13 +42,16 @@ from src.utils.parsers import print_results
 
 
 from src.solvers.multiobj_benchmark import compare_objectives as run_objective_benchmark
+from src.solvers.popmusic import compare_popmusic as run_popmusic_benchmark
 
 
 def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Union[int, str]] = 3,
          dataset: str = "real", city: Optional[str] = "São Paulo", neighborhood: Optional[str] = "Moema",
          random_seed: Optional[int] = 8, fixed_ratio: Optional[float] = None,
          hidden_schedule: Optional[bool] = None, multiobj: bool = False,
-         multiobj_mode: str = "hierarchical", compare_objectives: bool = False):
+         multiobj_mode: str = "hierarchical", compare_objectives: bool = False,
+         popmusic: bool = False, popmusic_r: int = 2,
+         popmusic_sub_time_limit: float = 30.0, compare_popmusic: bool = False):
     """
     Main execution pipeline for local development and benchmarking.
 
@@ -68,6 +73,11 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         hidden_schedule (Optional[bool]): Whether the time windows come from a hidden reference day
             that keeps the instance feasible. False draws each booked start on its own and lets the
             solver receive an instance that may be infeasible. None keeps the generator default, on.
+        popmusic (bool): Whether to solve using the POPMUSIC matheuristic decomposition instead
+            of a single monolithic MILP solve.
+        popmusic_r (int): Number of brokers r per POPMUSIC sub-problem (default: 2).
+        popmusic_sub_time_limit (float): Time limit in seconds per POPMUSIC sub-problem (default: 30.0).
+        compare_popmusic (bool): Run a side-by-side benchmark comparing Exact MILP vs POPMUSIC.
     """
     project_logger.info(f"Starting local WSRP optimization pipeline ({model_version}, {dataset})...")
 
@@ -104,9 +114,15 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         from src.models.model_3 import pareto_front as pareto_front_m3
         from src.models.model_3_a import pareto_front as pareto_front_m3_a
 
-        project_logger.info("PHASE 2: Pareto front, one MILP per fleet size...")
+        pop_tag = f" via POPMUSIC (r={popmusic_r})" if popmusic else ""
+        project_logger.info(f"PHASE 2: Pareto front, one MILP per fleet size{pop_tag}...")
         front_fn = pareto_front_m3_a if model_version == 'm3.a' else pareto_front_m3
-        front = front_fn(data_payload)
+        front = front_fn(
+            data_payload,
+            popmusic=popmusic,
+            popmusic_r=popmusic_r,
+            popmusic_sub_time_limit=popmusic_sub_time_limit,
+        )
         if not front:
             project_logger.error("No feasible fleet size.")
             return
@@ -122,6 +138,19 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         run_objective_benchmark(data_payload, model_version=model_version, modes=('hierarchical', 'blended'), mip_gap=0.0)
         return
 
+    if compare_popmusic:
+        project_logger.info(f"PHASE 2 & 3: Running solver benchmark (Exact MILP vs POPMUSIC r={popmusic_r})...")
+        run_popmusic_benchmark(
+            data_payload,
+            model_version=model_version,
+            sub_size=popmusic_r,
+            sub_time_limit=popmusic_sub_time_limit,
+            mip_gap=0.0,
+            multiobj=multiobj,
+            multiobj_mode=multiobj_mode,
+        )
+        return
+
     project_logger.info("PHASE 2: Building abstract MILP model...")
     abstract_model = BUILDERS[model_version](data_payload)
 
@@ -129,7 +158,8 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
     # PHASE 3: Optimization Engine (Strategy Pattern)
     # ---------------------------------------------------------
     mode_label = f" (Multi-Objective {multiobj_mode})" if multiobj else ""
-    project_logger.info(f"PHASE 3: Dispatching model to Gurobi engine (Absolute Optimality{mode_label})...")
+    solver_strategy_label = f"POPMUSIC Matheuristic (r={popmusic_r}){mode_label}" if popmusic else f"Absolute Optimality{mode_label}"
+    project_logger.info(f"PHASE 3: Dispatching model to Gurobi engine ({solver_strategy_label})...")
 
     # Using gurobi_direct for in-memory high performance communication
     solved_model, metrics = solve_model(
@@ -138,8 +168,11 @@ def main(model_version: str, num_properties: int = 5, num_brokers: Optional[Unio
         time_limit=1800,
         mip_gap=0.0,
         raw=False,
-        multiobj=multiobj,
+        multiobj=multiobj if multiobj else None,
         multiobj_mode=multiobj_mode,
+        popmusic=popmusic,
+        popmusic_r=popmusic_r,
+        popmusic_sub_time_limit=popmusic_sub_time_limit,
     )
 
     # ---------------------------------------------------------
@@ -210,6 +243,16 @@ if __name__ == "__main__":
     parser.add_argument('--compare-objectives', action='store_true',
                         help="Run a side-by-side benchmark comparing the default scalarized objective against "
                              "Gurobi's native multi-objective engine in hierarchical and blended modes")
+    parser.add_argument('--popmusic', action='store_true',
+                        help="Solve using the POPMUSIC matheuristic decomposition (iteratively optimizing "
+                             "sub-problems of r proximate brokers) instead of a single monolithic MILP")
+    parser.add_argument('--popmusic-r', type=int, default=2,
+                        help="Number of brokers r per POPMUSIC sub-problem (default: 2)")
+    parser.add_argument('--popmusic-sub-time-limit', type=float, default=30.0,
+                        help="Time limit in seconds for each POPMUSIC sub-problem MILP (default: 30.0)")
+    parser.add_argument('--compare-popmusic', action='store_true',
+                        help="Run a side-by-side benchmark comparing Exact MILP (without POPMUSIC) against "
+                             "POPMUSIC on the selected model and instance")
     args = parser.parse_args()
     if args.dataset == 'real' and not args.city:
         parser.error("--dataset real requires --city")
@@ -217,4 +260,7 @@ if __name__ == "__main__":
          city=args.city, neighborhood=args.neighborhood, random_seed=args.seed, fixed_ratio=args.fixed_ratio,
          hidden_schedule=False if args.no_hidden_schedule else None,
          multiobj=args.multiobj, multiobj_mode=args.multiobj_mode,
-         compare_objectives=args.compare_objectives)
+         compare_objectives=args.compare_objectives,
+         popmusic=args.popmusic, popmusic_r=args.popmusic_r,
+         popmusic_sub_time_limit=args.popmusic_sub_time_limit,
+         compare_popmusic=args.compare_popmusic)
