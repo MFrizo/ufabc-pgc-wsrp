@@ -227,6 +227,42 @@ def print_multiobj_summary(metrics: dict[str, Any]) -> None:
     print("=" * 62 + "\n")
 
 
+def print_popmusic_summary(metrics: dict[str, Any]) -> None:
+    """
+    Prints a summary table of POPMUSIC matheuristic execution metrics.
+
+    Args:
+        metrics (dict[str, Any]): Solver metrics returned by solve_popmusic.
+    """
+    if not metrics.get('popmusic'):
+        return
+
+    r = metrics.get('popmusic_r', 2)
+    subproblems = metrics.get('popmusic_subproblems', 0)
+    improvements = metrics.get('popmusic_improvements', 0)
+    init_obj = metrics.get('initial_objective')
+    final_obj = metrics.get('final_objective')
+
+    print("\n" + "=" * 62)
+    print(f"POPMUSIC MATHEURISTIC SUMMARY (r={r})")
+    print("=" * 62)
+    print(f"Sub-problems Solved   : {subproblems}")
+    print(f"Improvements Found    : {improvements}")
+    if init_obj is not None:
+        print(f"Initial Objective (S0): {init_obj:.4f}")
+    if final_obj is not None:
+        print(f"Final Objective       : {final_obj:.4f}")
+    for entry in metrics.get('popmusic_history', []):
+        status_tag = "IMPROVED" if entry['improved'] else "NO CHANGE"
+        brokers_str = ", ".join(str(k) for k in entry['sub_brokers'])
+        print(
+            f"  Step {entry['step']:>2} | Seed {entry['seed_broker']} -> Brokers [{brokers_str}] "
+            f"({entry['num_sub_properties']} visits) | {status_tag:<9} | Obj: {entry['objective']:.4f} "
+            f"({entry['cpu_time_seconds']:.3f}s)"
+        )
+    print("=" * 62 + "\n")
+
+
 def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None,
                   solver_mode: Optional[str] = None,
                   metrics: Optional[dict[str, Any]] = None) -> None:
@@ -241,6 +277,9 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
         solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
         metrics (Optional[dict[str, Any]]): Optional solver metrics; if multi-objective, prints breakdown.
     """
+    if metrics and metrics.get('popmusic'):
+        print_popmusic_summary(metrics)
+
     if metrics and metrics.get('multiobj'):
         print_multiobj_summary(metrics)
 
