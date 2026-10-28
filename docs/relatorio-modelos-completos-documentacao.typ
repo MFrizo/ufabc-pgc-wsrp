@@ -328,6 +328,25 @@ Embora o M1.b e o M1.a compartilhem o mesmo poliedro viável, os algoritmos e me
 - *Poda no branch-and-bound:* no M1.b, ao resolver o Estágio 1, a restrição de corte $"frota"(x) <= z_1^*$ poda imediatamente toda a região do espaço de busca que necessitaria de mais de $z_1^*$ corretores antes de iniciar a otimização dos tempos de viagem e atrasos.
 - *Equivalência das rotas ótimas:* em instâncias bem calibradas em que o custo operacional não ultrapassa o limiar de um corretor adicional, ambas as abordagens convergem para a mesma solução ótima de roteamento (confirmado pelo benchmark com `Route Sequence Match: IDENTICAL`), mas o M1.b atinge esse resultado com maior robustez numérica e sem parâmetros de penalidade artificiais.
 
+=== Dinâmica de desempenho entre escalas (M1.b versus M1.a)
+
+Os testes empíricos executados no catálogo real de Moema (`fixed_ratio = 1,0`, semente 8) revelam que o desempenho comparativo entre o M1.b e o M1.a decorre do equilíbrio entre dois fenômenos algorítmicos concorrentes: o _overhead de resolução multi-estágio_ e a _poda combinatória por corte de frota_:
+
+#figure(
+  table(
+    columns: (1.5cm, 2.0cm, 2.0cm, 2.2cm, 2.2cm, 1fr),
+    align: (center, right, right, right, center, left),
+    table.header([Imóveis], [M1 (Big-M)], [M1.a (MTZ)], [M1.b (Multiobj)], [Mais rápido], [Mecanismo computacional]),
+    [5], [0,0940 s], [0,3375 s], [0,2685 s], [M1.b ($1,26times$)], [Presolve resolve frota na raiz e evita degenerescência dual na distância.],
+    [20], [0,4829 s], [0,1981 s], [0,3325 s], [M1.a ($1,68times$)], [Resolução em passo único do M1.a é tão rápida que supera o custo fixo de 3 estágios.],
+    [40], [0,9731 s], [0,6261 s], [0,4924 s], [M1.b ($1,27times$)], [Corte rígido de frota no Estágio 1 elimina todo o subespaço com $> K^*$ corretores.],
+  ),
+  caption: [Comparativo de tempos de execução entre M1, M1.a e M1.b em Moema (`fixed_ratio = 1,0`, semente 8).],
+)
+
+- *Por que o M1.b é mais lento em instâncias intermediárias ($N = 20$):* o M1.a resolve o problema em uma única passagem pelo branch-and-cut. Quando a relaxação linear fortalecida do MTZ levantado é suficiente para fechar a folga de otimalidade quase instantaneamente (0,1981 s), o custo cumulativo no M1.b de executar três subproblemas sucessivos (re-presolve, atualização de gradientes e re-otimização dual pelo simplex) supera o esforço da árvore única.
+- *Por que o M1.b é mais veloz em instâncias densas ($N = 40$):* na escala de 40 imóveis, o espaço combinatório expande-se acentuadamente. No M1.a, o resolvedor precisa explorar nós fracionários de frota concorrendo com custos operacionais. No M1.b, a frota mínima $K^*$ é provada e congelada no Estágio 1 pelo corte $sum y_k <= K^*$, podando de saída toda a região de soluções que utilizaria corretores excedentes e acelerando o Estágio 2 para atingir a otimalidade em 0,4924 s (quase $2times$ mais rápido que o M1 e $1,27times$ mais rápido que o M1.a).
+
 = M2 — ponto de vista do corretor
 
 O M2 é o HC-DOMDVRPTW-SD: a mesma família de roteamento do M1, com a jornada do corretor no centro do modelo. O construtor é `build_model_m2`, em `src/models/model_2.py`.
