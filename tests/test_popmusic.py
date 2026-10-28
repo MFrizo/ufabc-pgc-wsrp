@@ -13,7 +13,12 @@ from src.models.model_1_b import build_model_m1_b
 from src.models.model_2_a import build_model_m2_a
 from src.models.model_3_a import pareto_front as pareto_front_m3_a
 from src.solvers.engine import solve_model
-from src.solvers.popmusic import compare_popmusic, solve_popmusic
+from src.solvers.popmusic import (
+    _build_subproblem_for_seed,
+    _is_subset_of_pi,
+    compare_popmusic,
+    solve_popmusic,
+)
 from src.utils.parsers import extract_open_routes
 
 
@@ -73,6 +78,66 @@ def _three_broker_m1_instance() -> dict:
 
 
 class TestPopmusicMatheuristic(unittest.TestCase):
+    def test_algorithm_1_subproblem_construction_and_pi_subset_check(self):
+        # Route 1 visits {1, 2}, Route 2 visits {3, 4}, Route 3 visits {5}
+        route_customers = {1: {1, 2}, 2: {3, 4}, 3: {5}}
+        sym_costs = {
+            (i, i): 0.0 for i in range(1, 6)
+        }
+        # Distances from seed i=1:
+        # min_{j in C(1)} c_{1,j} = c_{1,1} = 0
+        # min_{j in C(2)} c_{1,j} = 10 (closest route after r=1, has |C(2)| = 2)
+        # min_{j in C(3)} c_{1,j} = 20 (farthest route, has |C(3)| = 1)
+        sym_costs.update({
+            (1, 2): 5.0, (2, 1): 5.0,
+            (1, 3): 10.0, (3, 1): 10.0,
+            (1, 4): 12.0, (4, 1): 12.0,
+            (1, 5): 20.0, (5, 1): 20.0,
+        })
+
+        # With dim_sp = 3:
+        # 1) r_hat = 1 (cost 0, size 2 <= 3) -> V_sp = {1, 2}, R = [1]
+        # 2) next r_hat = 2 (cost 10, size 2): |V_sp| + |C(2)| = 4 > 3 -> breaks immediately (line 19)
+        #    Must NOT skip route 2 to include route 3!
+        v_sp_3, r_3 = _build_subproblem_for_seed(1, 3, route_customers, sym_costs)
+        self.assertEqual(v_sp_3, frozenset({1, 2}))
+        self.assertEqual(r_3, [1])
+
+        # With dim_sp = 4:
+        # 1) r_hat = 1 -> V_sp = {1, 2}
+        # 2) r_hat = 2 -> |V_sp| + |C(2)| = 4 <= 4 -> V_sp = {1, 2, 3, 4}, R = [1, 2]
+        v_sp_4, r_4 = _build_subproblem_for_seed(1, 4, route_customers, sym_costs)
+        self.assertEqual(v_sp_4, frozenset({1, 2, 3, 4}))
+        self.assertEqual(r_4, [1, 2])
+
+        # Line 21 subset check against Pi:
+        pi_memory = {v_sp_4: {1: frozenset({1, 2}), 2: frozenset({3, 4})}}
+        self.assertTrue(_is_subset_of_pi(v_sp_3, pi_memory))
+        self.assertTrue(_is_subset_of_pi(v_sp_4, pi_memory))
+        self.assertFalse(_is_subset_of_pi(frozenset({1, 2, 5}), pi_memory))
+
+    def test_m1_a_popmusic_alpha_delta_and_node_limit(self):
+        data = _three_broker_m1_instance()
+        m_pop = build_model_m1_a(data)
+        _, metrics = solve_model(
+            m_pop,
+            mip_gap=0.0,
+            tee=False,
+            popmusic=True,
+            popmusic_alpha=2,
+            popmusic_delta=2,
+            popmusic_node_limit=500,
+            popmusic_seed=7,
+        )
+        self.assertEqual(metrics['solver_status'], 'ok')
+        self.assertTrue(metrics['popmusic'])
+        self.assertEqual(metrics['popmusic_alpha'], 2)
+        self.assertEqual(metrics['popmusic_delta'], 2)
+        self.assertGreaterEqual(metrics['popmusic_subproblems'], 1)
+        for entry in metrics['popmusic_history']:
+            self.assertIn('dim_sp', entry)
+            self.assertIn('seed_vertex', entry)
+
     def test_m1_a_popmusic_r2_on_3_brokers(self):
         data = _three_broker_m1_instance()
 
