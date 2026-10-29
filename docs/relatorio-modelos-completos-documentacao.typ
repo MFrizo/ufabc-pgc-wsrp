@@ -275,6 +275,78 @@ $ sum_(k in K) (x_(i j k) + x_(j i k)) <= 1 quad forall i, j in C, i < j $
 
 O termo reverso $(b_i - a_j - s_j - t^k_(j i)) thin x_(j i k)$ da equação (11) de Desrochers e Laporte (1991) não é somado diretamente em $w_i - w_j <= b_i - a_j$: como demonstraram Yuan, Cattaruzza, Ogier e Semet (2020), quando $x_(j i k) = 1$ esse coeficiente força $w_i <= w_j + s_j + t^k_(j i)$, proibindo espera no nó $i$.
 
+== M1.b, otimização multiobjetivo nativa do Gurobi
+
+O M1.b (`build_model_m1_b`, em `src/models/model_1_b.py`) herda o mesmo poliedro com MTZ levantado do M1.a, mas substitui a escalarização a priori da função objetivo pela interface multiobjetivo nativa do Gurobi (`setObjectiveN`). Em vez de depender de um peso artificialmente grande $W_"frota" = 10.000$ para forçar a minimização da frota e de um peso infinitesimal $W_"dist" = 1 / (U + 1) approx 10^(-6)$ para desempate, o M1.b define uma hierarquia explícita de três níveis de prioridade lexicográfica:
+
+#figure(
+  table(
+    columns: (1.8cm, 3.2cm, 4.2cm, 1.4cm, 1fr),
+    table.header([Prioridade], [Componente], [Termo matemático], [Peso], [Função]),
+    [*2*], [Frota (`fleet`)], [$sum_(k in K) y_k$], [1.0], [Critério primário: minimiza corretores ativos],
+    [*1*], [Tempo (`travel_time`)], [$sum_((i, j, k) in cal(A)) t^k_(i j) thin x_(i j k)$], [1.0], [Custo operacional: tempo de direção],
+    [*1*], [Atraso (`delay`)], [$sum_(i in C_h) delta_i$], [10.0], [Custo operacional: penalidade de atraso],
+    [*1*], [Hora extra (`overtime`)], [$sum_(k in K) o_k$], [100.0], [Custo operacional: penalidade de hora extra],
+    [*0*], [Distância (`distance`)], [$sum_((i, j, k) in cal(A)) c^k_(i j) thin x_(i j k)$], [1.0], [Desempate: separa planos com mesmos custos],
+  ),
+  caption: [Hierarquia multiobjetivo do M1.b no Gurobi (`setObjectiveN`).],
+)
+
+=== Algoritmo de resolução: multiobjetivo do Gurobi versus escalarização do M1.a
+
+Embora o M1.b e o M1.a compartilhem o mesmo poliedro viável, os algoritmos e mecanismos internos do resolvedor operam de forma fundamentalmente distinta:
+
+1. *Otimização sequencial lexicográfica com cortes de objetivo (M1.b):*
+  - _Combinação por nível (blended):_ componentes que compartilham a mesma prioridade são combinados numa soma ponderada local $min sum_j w_j f_j (x)$. No M1.b, tempo ($w=1$), atraso ($w=10$) e hora extra ($w=100$) dividem a Prioridade 1 e preservam suas proporções relativas.
+  - _Sequência multi-estágio:_ o resolvedor resolve uma sucessão de problemas de otimização da maior para a menor prioridade:
+    - *Estágio 1 (Prioridade 2 — Frota):* resolve $min thin "frota"(x) = sum_(k in K) y_k$, obtendo o número mínimo viável de corretores $z_1^*$. Em seguida, injeta a restrição de corte $"frota"(x) <= z_1^* + "abstol"_1 + "reltol"_1 dot |z_1^*|$. Como $"abstol" = "reltol" = 0$, a frota fica rigidamente fixada em seu mínimo provado.
+    - *Estágio 2 (Prioridade 1 — Custos operacionais):* resolve $min (sum t^k_(i j) x_(i j k) + 10 sum delta_i + 100 sum o_k)$ sujeito a $"frota"(x) <= z_1^*$ e às restrições do problema, obtendo o custo ótimo $z_2^*$. O Gurobi então adiciona o corte correspondente $"ops"(x) <= z_2^*$.
+    - *Estágio 3 (Prioridade 0 — Distância):* minimiza a distância total percorrida sujeita a $"frota"(x) <= z_1^*$ e $"ops"(x) <= z_2^*$, servindo estritamente como critério de desempate sem distorcer o custo operacional.
+  - _Warm-start e reutilização de cortes:_ entre um estágio e o seguinte, o Gurobi mantém a base simplex, as soluções incumbentes e os planos de corte já gerados, acelerando sensivelmente as etapas subsequentes.
+
+2. *Escalarização a priori em passo único (M1.a):*
+  - O M1.a resolve o problema em uma única árvore de _branch-and-cut_ com todos os 5 termos agregados numa única função objetivo.
+  - Para impor a prioridade lexicográfica sem estágios separados, a frota exige uma penalidade artificial imensa ($W_"frota" = 10.000$) e a distância exige um peso infinitesimal ($W_"dist" = 1 / (U + 1) approx 10^(-6)$).
+
+#figure(
+  table(
+    columns: (3.2cm, 1fr, 1fr),
+    table.header([Dimensão], [M1.a (Escalarizado)], [M1.b (Multiobjetivo Gurobi)]),
+    [Método de otimização], [Passo único sobre uma função escalar], [Otimização sequencial lexicográfica multi-estágio],
+    [Número de sub-resoluções], [Exatamente 1 resolução], [3 subproblemas sequenciais (um por prioridade)],
+    [Semântica dos pesos], [Coeficientes globais de troca entre todos os termos], [Pesos locais somente dentro da mesma prioridade],
+    [Condicionamento numérico], [Faixa dinâmica de $10^4$ a $10^(-6)$ (razão $10^(10)$)], [Normalizado em escalas naturais ($1.0$, $10.0$, $100.0$)],
+    [Mecanismo de desempate], [Divisor artificial $1 / (U + 1)$ na distância], [Desempate lexicográfico puro na Prioridade 0],
+    [Controle de tolerâncias], [Rígido; exige recalibrar todos os pesos], [Nativo via `abstol` e `reltol` por nível],
+  ),
+  caption: [Comparativo entre a escalarização a priori do M1.a e a otimização multiobjetivo do M1.b.],
+)
+
+=== Implicações práticas e computacionais
+
+- *Estabilidade numérica e mascaramento por tolerância:* no M1.a, a faixa de $10^(10)$ entre o maior e o menor coeficiente faz com que variações de distância possam ficar próximas ou abaixo da tolerância de otimalidade do solver (`MIPGap` ou `OptimalityTol` de $10^(-6)$), arriscando empates numéricos espúrios. No M1.b, cada estágio opera na escala natural dos termos ($w = 1.0$ para a distância).
+- *Poda no branch-and-bound:* no M1.b, ao resolver o Estágio 1, a restrição de corte $"frota"(x) <= z_1^*$ poda imediatamente toda a região do espaço de busca que necessitaria de mais de $z_1^*$ corretores antes de iniciar a otimização dos tempos de viagem e atrasos.
+- *Equivalência das rotas ótimas:* em instâncias bem calibradas em que o custo operacional não ultrapassa o limiar de um corretor adicional, ambas as abordagens convergem para a mesma solução ótima de roteamento (confirmado pelo benchmark com `Route Sequence Match: IDENTICAL`), mas o M1.b atinge esse resultado com maior robustez numérica e sem parâmetros de penalidade artificiais.
+
+=== Dinâmica de desempenho entre escalas (M1.b versus M1.a)
+
+Os testes empíricos executados no catálogo real de Moema (`fixed_ratio = 1,0`, semente 8) revelam que o desempenho comparativo entre o M1.b e o M1.a decorre do equilíbrio entre dois fenômenos algorítmicos concorrentes: o _overhead de resolução multi-estágio_ e a _poda combinatória por corte de frota_:
+
+#figure(
+  table(
+    columns: (1.5cm, 2.0cm, 2.0cm, 2.2cm, 2.2cm, 1fr),
+    align: (center, right, right, right, center, left),
+    table.header([Imóveis], [M1 (Big-M)], [M1.a (MTZ)], [M1.b (Multiobj)], [Mais rápido], [Mecanismo computacional]),
+    [5], [0,0940 s], [0,3375 s], [0,2685 s], [M1.b ($1,26times$)], [Presolve resolve frota na raiz e evita degenerescência dual na distância.],
+    [20], [0,4829 s], [0,1981 s], [0,3325 s], [M1.a ($1,68times$)], [Resolução em passo único do M1.a é tão rápida que supera o custo fixo de 3 estágios.],
+    [40], [0,9731 s], [0,6261 s], [0,4924 s], [M1.b ($1,27times$)], [Corte rígido de frota no Estágio 1 elimina todo o subespaço com $> K^*$ corretores.],
+  ),
+  caption: [Comparativo de tempos de execução entre M1, M1.a e M1.b em Moema (`fixed_ratio = 1,0`, semente 8).],
+)
+
+- *Por que o M1.b é mais lento em instâncias intermediárias ($N = 20$):* o M1.a resolve o problema em uma única passagem pelo branch-and-cut. Quando a relaxação linear fortalecida do MTZ levantado é suficiente para fechar a folga de otimalidade quase instantaneamente (0,1981 s), o custo cumulativo no M1.b de executar três subproblemas sucessivos (re-presolve, atualização de gradientes e re-otimização dual pelo simplex) supera o esforço da árvore única.
+- *Por que o M1.b é mais veloz em instâncias densas ($N = 40$):* na escala de 40 imóveis, o espaço combinatório expande-se acentuadamente. No M1.a, o resolvedor precisa explorar nós fracionários de frota concorrendo com custos operacionais. No M1.b, a frota mínima $K^*$ é provada e congelada no Estágio 1 pelo corte $sum y_k <= K^*$, podando de saída toda a região de soluções que utilizaria corretores excedentes e acelerando o Estágio 2 para atingir a otimalidade em 0,4924 s (quase $2times$ mais rápido que o M1 e $1,27times$ mais rápido que o M1.a).
+
 = M2 — ponto de vista do corretor
 
 O M2 é o HC-DOMDVRPTW-SD: a mesma família de roteamento do M1, com a jornada do corretor no centro do modelo. O construtor é `build_model_m2`, em `src/models/model_2.py`.
