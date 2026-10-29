@@ -598,6 +598,70 @@ $ o_(k s) <= w_(f_k) - w_(d_k), quad u_k >= w_(f_k) - w_(d_k) - sum_s o_(k s) qu
 
 3. *Poda de pares de almoço inviáveis no tempo:* toda variável $z_(i j k)$ cujo arco de entrada $x_(i, a_k, k)$ ou saída $x_(a_k, j, k)$ foi fixado em zero no M1.a, ou tal que $a_i + s_i + s_(a_k) + t^k_(i j) > b_j$, é fixada em $z_(i j k) = 0$.
 
+= Matheurística POPMUSIC para decomposição do WSRP
+
+À medida que o número de imóveis $n = |C|$ e de corretores $m = |K|$ cresce, a resolução monolítica do MILP completo em uma única árvore de _branch-and-cut_ torna-se o principal gargalo computacional. Para permitir o escalonamento dos modelos mantendo a exatidão local das restrições de janelas de tempo, almoço, turnos e múltiplos objetivos, o motor de resolução (`src/solvers/popmusic.py` e `src/solvers/engine.py`) implementa a matheurística POPMUSIC (_Partial OPtimization Metaheuristic Under Special Intensification Conditions_), proposta originalmente por Taillard e Voss (2002) e especializada para roteamento de veículos por Queiroga, Sadykov e Uchoa (2021).
+
+A implementação segue estritamente o *Algoritmo 1 (`POP`)* de Queiroga, Sadykov e Uchoa (2021), adaptando a construção de subproblemas induzidos por vértices-semente e o controle de memória $Pi$ às particularidades do WSRP (múltiplos depósitos residenciais, pausas de almoço, divisão em turnos e hierarquia multiobjetivo).
+
+== Estrutura do Algoritmo 1 (Queiroga, Sadykov e Uchoa, 2021)
+
+Seja $S = {r_1, r_2, dots, r_(|S|)}$ uma solução viável corrente, em que cada rota ativa $r in S$ atende o subconjunto não vazio de imóveis $C(r) subset.eq C$. Define-se a matriz simétrica de proximidade entre imóveis $c^"sym"_(i j) = 1/2 (c_(i j) + c_(j i))$ para $i, j in C$, com $c^"sym"_(i i) = 0$.
+
+1. *Solução inicial ($S_0$):* se o modelo Pyomo ainda não possui uma solução viável carregada, o resolvedor obtém uma solução factível inicial $S_0$ executando o Gurobi com `SolutionLimit = 1` e `MIPFocus = 1` (foco em factibilidade).
+2. *Inicialização (linhas 4–5):* a dimensão-alvo do subproblema (medida em número de imóveis) é inicializada em $"dim"_"sp" <- alpha$, e o conjunto de memória de subproblemas já otimizados é inicializado vazio, $Pi <- emptyset$.
+3. *Laço externo de dimensão (linha 6):* enquanto o limite global de tempo não for atingido e $"dim"_"sp" <= |C|$:
+  - *Permutação aleatória de sementes (linha 7):* gera-se um vetor $L$ contendo todos os imóveis $i in C$ em ordem aleatória (controlada por `seed`).
+  - *Varredura de sementes (linhas 8–9):* para cada posição $z = 1, dots, |C|$, toma-se o imóvel-semente $i = L[z]$.
+  - *Construção gulosa do subproblema $(V_"sp", R)$ (linhas 10–19):* partindo de $V_"sp" <- emptyset$ e $R <- emptyset$, seleciona-se iterativamente a rota ativa mais próxima do imóvel-semente $i$ ainda não incluída em $R$:
+    $ hat(r) = arg min_(r in S, thin r in.not R) { min_(j in C(r)) c^"sym"_(i j) } $
+    Como $c^"sym"_(i i) = 0$, a primeira rota escolhida é sempre a própria rota que visita $i$. Se $|V_"sp"| + |C(hat(r))| <= "dim"_"sp"$, atualiza-se $V_"sp" <- V_"sp" union C(hat(r))$ e $R <- R union {hat(r)}$; caso contrário ($|V_"sp"| + |C(hat(r))| > "dim"_"sp"$), a construção é interrompida imediatamente (linha 19), sem saltar $hat(r)$ para tentar encaixar rotas mais distantes.
+  - *Filtro de redundância por inclusão em $Pi$ (linha 21):* verifica-se se $V_"sp" subset.eq V'$ para algum par $(V', S') in Pi$. Se $V_"sp"$ já for subconjunto de um subproblema resolvido anteriormente sem alteração nas rotas que o compõem, a semente é descartada sem invocar o solver.
+  - *Resolução exata do subproblema $V_"sp"$ com _warm-start_ (linhas 22–24):* registra-se $(V_"sp", S_"sp")$ em $Pi$ e fixam-se (`var.fix()`) todas as variáveis de decisão dos imóveis congelados $C backslash V_"sp"$ e dos corretores/turnos fora do subproblema, mantendo livres as rotas $r in R$ e eventuais corretores ociosos ($C(k) = emptyset$). Os valores da subsolução corrente $S_"sp"$ permanecem atribuídos às variáveis livres como _MIP start_, fornecendo $"cost"(S_"sp")$ como limite superior inicial (corte de incumbente) para o algoritmo exato $A$ (Gurobi), limitado por `sub_time_limit` e opcionalmente por `sub_node_limit` (`NodeLimit`).
+  - *Intensificação e reinício na mesma dimensão (linhas 25–29):* se a subsolução obtida $S'_"sp"$ melhorar estritamente a incumbente ($"cost"(S'_"sp") < "cost"(S_"sp")$), atualiza-se a solução global $S$, substitui-se $(V_"sp", S_"sp")$ por $(V_"sp", S'_"sp")$ em $Pi$ (invalidando entradas anteriores $(V', S') in Pi$ cujos imóveis sofreram alteração de rota) e *reinicia-se imediatamente na linha 7* com uma nova permutação aleatória $L$ mantendo a mesma dimensão $"dim"_"sp"$. Se não houver melhora, restaura-se o _snapshot_ de $S$.
+  - *Progressão de dimensão (linha 31):* somente quando todos os $n$ imóveis-semente de $L$ são percorridos sem produzir melhora, a dimensão-alvo cresce em $"dim"_"sp" <- "dim"_"sp" + delta$.
+
+== Integração com as famílias de modelos (M0, M1, M1.a, M1.b, M2, M2.a, M3 e M3.a)
+
+Em vez de construir um modelo auxiliar separado para o subproblema, o decompositor opera diretamente sobre a instância `ConcreteModel` do Pyomo por fixação e liberação reversível de variáveis (`_fix_complement_for_subproblem` e `_unfix_to_baseline`), preservando todas as restrições estruturais fixadas pelo pré-processamento de cada modelo (`baseline_fixed_ids`):
+
+#figure(
+  table(
+    columns: (2.6cm, 3.8cm, 1fr),
+    table.header([Família], [Unidade de rota em $S$], [Tratamento das variáveis e do objetivo no subproblema $V_"sp"$]),
+    [M0.0 / M0.1], [Corretor único ($|K| = 1$)], [Decomposição trivial: delega diretamente ao MILP exato.],
+    [M0.2 a M0.6], [Corretor $k in K$ (rota fechada)], [Congela $x_(i j k)$ para $k in.not R_"sub"$ ou $i, j in C backslash V_"sp"$, bem como $w_i$ dos imóveis fora de $V_"sp"$.],
+    [M1 / M1.a], [Corretor $k in K$ (rota aberta)], [Libera arcos em $V_"sp" union {d_k, a_k, f_k}$ para $k in R_"sub"$, variáveis $y_k, o_k$ e tempos $w_i, delta_i$ ($i in V_"sp"$).],
+    [M1.b], [Corretor $k in K$ (multiobjetivo)], [Resolve cada subproblema $V_"sp"$ com `setObjectiveN` (3 prioridades) e compara $"cost"(S'_"sp") < "cost"(S_"sp")$ lexicograficamente por tupla de prioridades.],
+    [M2 / M2.a], [Corretor $k in K$ (turnos $r in R_k$)], [Agrupa os turnos manhã/tarde de cada corretor $k in R_"sub"$, congela $omega_k$ para $k in.not R_"sub"$ e mantém $Omega$ livre para recomputar a maior jornada.],
+    [M3 / M3.a], [Frota limitada por $epsilon$-restrição], [Aplica o POPMUSIC em cada subproblema $sum_(k in K) y_k <= m$ da varredura da frente de Pareto (`pareto_front(..., popmusic=True)`).],
+  ),
+  caption: [Adaptação da decomposição POPMUSIC às famílias de modelos do WSRP.],
+)
+
+== Parâmetros e validação experimental
+
+Os parâmetros do algoritmo podem ser acionados tanto via linha de comando (`main.py`) quanto programaticamente em `solve_model`, `solve_popmusic` e no notebook do Google Colab:
+
+#figure(
+  table(
+    columns: (4.5cm, 3.3cm, 2.6cm, 1fr),
+    table.header([Parâmetro Python], [Flag CLI (`main.py`)], [Padrão], [Papel no Algoritmo 1]),
+    [`popmusic`], [`--popmusic` / `--no-popmusic`], [`False`], [Ativa ou desativa a resolução por decomposição POPMUSIC.],
+    [`popmusic_alpha`], [`--popmusic-alpha`], [Auto ($approx 2 |C| slash |K|$)], [Dimensão inicial de imóveis $alpha$ atribuída a $"dim"_"sp"$ na linha 4.],
+    [`popmusic_delta`], [`--popmusic-delta`], [Auto ($approx |C| slash |K|$)], [Incremento $delta$ somado a $"dim"_"sp"$ na linha 31 ao esgotar $L$ sem melhora.],
+    [`popmusic_sub_time_limit`], [`--popmusic-sub-time`], [`30.0` s], [Limite de tempo em segundos por subproblema resolvido pelo algoritmo $A$.],
+    [`popmusic_node_limit`], [`--popmusic-node-limit`], [`None`], [Limite opcional de nós de _branch-and-bound_ (`NodeLimit`) por subproblema.],
+    [`popmusic_initial_time_limit`], [`--popmusic-init-time`], [`60.0` s], [Limite de tempo para encontrar a solução viável inicial $S_0$.],
+    [`compare_popmusic`], [`--compare-popmusic`], [`False`], [Executa o MILP exato e o POPMUSIC lado a lado na mesma instância.],
+  ),
+  caption: [Parâmetros de configuração da matheurística POPMUSIC.],
+)
+
+Em instâncias de grande porte ($|C| >= 100$), os valores padrão de $alpha$ e $delta$ convergem para a calibração recomendada por Queiroga, Sadykov e Uchoa (2021) ($alpha = 50$, $delta = 40$). Em instâncias menores ou moderadas do WSRP, o dimensionamento automático escala $alpha$ para abranger o tamanho médio de duas rotas ($2 ceil(|C| slash |K|)$) e $delta$ para o tamanho médio de uma rota ($ceil(|C| slash |K|)$).
+
+Na validação empírica sobre o catálogo real de Moema com o modelo M1.a ($|C| = 12$ imóveis, $|K| = 4$ corretores, `fixed_ratio = 0,3`, semente 8, $alpha = 6$, $delta = 3$), a solução inicial $S_0$ parte do objetivo $100.195,1317$; o algoritmo resolve 13 subproblemas (4 em $"dim"_"sp" = 6$, 8 em $"dim"_"sp" = 9$ e 1 em $"dim"_"sp" = 12$), acumulando 7 melhorias sucessivas até convergir para o ótimo global provado de $100.157,0734$ (4 corretores, 53,00 min de viagem, 0,00 min de atraso e 94,76 unidades de distância, com _gap_ de $+0,00%$ em relação ao MILP exato).
+
 = Gerador de instâncias
 
 Os modelos leem a mesma função, `generate_wsrp_instance`, em `src/core/data_generator.py`. Uma chamada monta a instância inteira. Cada modelo usa só as chaves de que precisa. Cada recurso sorteia no próprio fluxo, derivado da semente: o grafo usa a semente pura, e janelas, designações, durações, casas, pontos de almoço, turnos e frota automática usam `default_rng([semente, fluxo])`. Acrescentar um recurso não desloca os números dos anteriores.
@@ -741,7 +805,7 @@ O nome dinâmico nos três títulos não significa reotimização dentro do MILP
 
 = Referências citadas nas notas
 
-As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m2.md`, `m2.a.md`, `m3.md` e `m3.a.md`. As que este texto nomeia são:
+As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m1.b.md`, `m2.md`, `m2.a.md`, `m3.md` e `m3.a.md`. As que este texto nomeia são:
 
 - Ballou, Rahardja e Sakai (2002), fatores de circuidade.
 - Bektaş e Laporte (2011), problema de roteamento com poluição.
@@ -761,6 +825,8 @@ As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `doc
 - Mavrotas (2009), método da $epsilon$-restrição.
 - OpenStreetMap contributors, rede baixada em 10 de outubro de 2026.
 - Paraskevopoulos, Laporte, Repoussis e Tarantilis (2017), roteamento restrito por recurso.
+- Queiroga, Sadykov e Uchoa (2021), matheurística POPMUSIC para roteamento de veículos (_Computers & Operations Research_, 136, 105475).
+- Taillard e Voss (2002), paradigma POPMUSIC (_Partial OPtimization Metaheuristic Under Special Intensification Conditions_).
 - Taş, Dellaert, van Woensel e de Kok (2013), tempo de viagem estocástico.
 - TomTom Traffic Index 2025, relatório de São Paulo.
 - Yuan, Cattaruzza, Ogier e Semet (2020), nota sobre a validade das restrições MTZ levantadas com espera.
