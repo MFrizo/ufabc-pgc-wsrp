@@ -172,6 +172,20 @@ Direct comparison between native Gurobi multi-objective optimization ([M1.b](../
 2. **Speedup at Scale**: While M1 is faster at $N=5$ due to minimal overhead on trivial solves, M1.b is **1.45x faster** than M1 at $N=20$ (0.3325 s vs. 0.4829 s) and **1.98x faster** (nearly half the runtime) at $N=40$ (0.4924 s vs. 0.9731 s).
 3. **M1.b vs. M1.a**: At $N=40$, M1.b also outperforms M1.a (0.4924 s vs. 0.6261 s), demonstrating that native multi-objective priority stages avoid the ill-conditioning of scalarized artificial Big-W weights.
 
+### POPMUSIC Matheuristic vs. Exact MIP Solver (Moema, seed 8, 50 houses, 4 brokers, fixed_ratio=0.9)
+
+Evaluation of the POPMUSIC matheuristic (*Partial OPtimization Metaheuristic Under Special Intensification Conditions*, based on Algorithm 1 of Queiroga, Sadykov, & Uchoa 2021) compared to the exact Gurobi solver (`solver_mode = default`) on a large instance in Moema (`MODEL_VERSION = "m1.a"`, `NUM_BROKERS = 4`, `RANDOM_SEED = 8`, `FIXED_RATIO = 0.9`):
+
+| Solver Mode | Model | Time (s) | Speedup | Brokers used | Delay (min) | Overtime (min) | Distance | Solution Details |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `default` (exact) | m1.a | 310.50 | 1.00x (base) | 4 of 4 | 10.00 | 444.00 | 375.42 | Hit nominal 300 s cutoff |
+| `popmusic` ($\alpha=6, \delta=3$) | m1.a | 179.77 | 1.73x (-42.1% time) | 4 of 4 | 10.00 | 444.00 | 375.41 | 33 sub-problems, 10 improvements ($S_0 = 313285.09 \to S^* = 299970.09$) |
+
+#### Key Insights:
+1. **Preserved and Enhanced Solution Quality**: POPMUSIC found a slightly better route layout (375.41 units vs. 375.42 units, saving 0.01 units by swapping visits 4 and 36 between Broker 2 and Broker 3), while matching the exact solver on all priority metrics (10.00 min delay on node 5, 444.00 min overtime, and 4 brokers utilized).
+2. **Computational Speedup**: The exact MIP solver exhausted the nominal 300 s time limit (finishing at 310.50 s). POPMUSIC converged in 179.77 s, achieving a **1.73x speedup** (42.1% runtime reduction).
+3. **Subproblem Dynamics**: Over 33 subproblem evaluations with expansion parameter $\delta=3$, POPMUSIC identified 10 sequential improvements, reducing the objective value from $S_0 = 313285.09$ to $S^* = 299970.09$ (-4.25% cost reduction).
+
 ### Stress test, seed 8, `raw=False`
 
 The fleet grows with the houses. A fit error means the hidden schedule is longer than 12 hours, so the next try is the same houses with more brokers.
