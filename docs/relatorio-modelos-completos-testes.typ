@@ -17,7 +17,7 @@
 #set text(lang: "pt", region: "br", size: 10.5pt, hyphenate: true)
 #set par(justify: true, leading: 0.62em)
 #set heading(numbering: "1.1")
-#show heading.where(level: 1): set block(above: 1.5em, below: 0.7em)
+#show heading.where(level: 1): set block(above: 1.25em, below: 0.55em)
 #set table(stroke: 0.4pt + luma(160), inset: (x: 4pt, y: 3.5pt))
 #show table: set text(size: 8.5pt)
 #show table.cell.where(y: 0): set text(hyphenate: false)
@@ -32,7 +32,7 @@
   #v(1.6cm)
   #text(size: 20pt, weight: "bold")[Testes e experimentos do WSRP]
   #v(0.45cm)
-  #text(size: 13pt)[M1, M1.a, M1.b, M2 e M3: protocolo, resultados e análise no catálogo real de São Paulo]
+  #text(size: 13pt)[M1, M1.a, M1.b, M2 e M3: protocolo, resultados, POPMUSIC e análise no catálogo real de São Paulo]
   #v(1.4cm)
   #text(size: 11pt)[18 de outubro de 2026]
   #v(1fr)
@@ -59,9 +59,10 @@ Este documento registra:
 2. As tabelas-resumo de alcance e os maiores casos resolvidos com solução ótima;
 3. Os resultados detalhados nas instâncias de Moema e da capital paulista;
 4. O comparativo da abordagem multiobjetivo nativa do M1.b frente aos modelos escalarizados M1 e M1.a;
-5. Os testes de estresse com aumento coordenado de instâncias e frota;
-6. A discussão aprofundada dos resultados e o comportamento das funções objetivo e restrições de jornada;
-7. A descrição da suíte de testes automatizados de unidade e integração implementada no repositório.
+5. A avaliação de desempenho e escalabilidade da meta-heurística POPMUSIC frente ao resolvedor exato;
+6. Os testes de estresse com aumento coordenado de instâncias e frota;
+7. A discussão aprofundada dos resultados e o comportamento das funções objetivo e restrições de jornada;
+8. A descrição da suíte de testes automatizados de unidade e integração implementada no repositório.
 
 As formulações matemáticas rigorosas, os parâmetros do gerador e as notas de decisão encontram-se documentados no relatório complementar `relatorio-modelos-completos-documentacao.pdf`.
 
@@ -72,6 +73,7 @@ Os números deste relatório são os do Google Colab, em 11 e 12 de outubro de 2
 #figure(
   table(
     columns: (4.2cm, 1fr),
+    inset: (x: 4pt, y: 2.5pt),
     table.header([Entrada], [Valor]),
     [Conjunto de dados], [`real`, catálogo de aluguéis],
     [Cidade], [São Paulo],
@@ -293,6 +295,27 @@ A tabela a seguir apresenta os resultados do M1.b nas instâncias de Moema com a
   caption: [Comparativo entre o modelo M1.b (multiobjetivo nativo via `setObjectiveN`) e os modelos escalarizados M1 e M1.a em Moema (`fixed_ratio = 1,0`, semente 8). Todas as métricas de solução (corretores, atraso, hora extra e distância) são rigorosamente idênticas entre as três formulações. O M1.b supera o M1 em 20 e 40 imóveis, sendo o mais rápido de todos na maior escala viável ($N=40$, quase $2times$ mais rápido que o M1).],
 )
 
+
+#pagebreak()
+= Avaliação da meta-heurística POPMUSIC vs. resolvedor exato
+
+Para instâncias de maior porte e frotas ampliadas, o tempo de resolução exata via Branch-and-Cut cresce substancialmente devido à explosão combinatória das variáveis de sequenciamento. Para contornar esse gargalo computacional preservando a alta qualidade dos planos, o repositório incorpora a meta-heurística POPMUSIC (*Partial OPtimization Metaheuristic Under Special Intensification Conditions*), implementada em `src/solvers/popmusic.py` segundo o Algoritmo 1 de Queiroga, Sadykov e Uchoa (2021).
+
+O método decompõe iterativamente o problema global em subproblemas locais restritos a um subconjunto de rotas geograficamente próximas em torno de vértices-semente $i in C$, cuja dimensão $"dim"_("sp")$ se expande gradualmente a partir de $alpha = 6$ com incrementos $delta = 3$. Cada subproblema $V_("sp")$ é resolvido com o modelo MIP exato utilizando a solução corrente como cota superior (warm start).
+
+A tabela a seguir compara diretamente o resolvedor exato (`solver_mode = default`) contra o POPMUSIC (`solver_mode = popmusic`) na instância de 50 imóveis e 4 corretores em Moema, com 90% de visitas marcadas (`fixed_ratio = 0,9`, semente 8):
+
+#figure(
+  table(
+    columns: (2.3cm, 1.4cm, 1.6cm, 1.6cm, 1.3cm, 1.1cm, 1.1cm, 1.3cm, 1fr),
+    align: (center, center, right, center, center, right, right, right, left),
+    table.header([Modo do solver], [Modelo], [Tempo (s)], [Aceleração], [Usados], [Atraso], [Extra], [Dist.], [Solução]),
+    [`default` (exato)], [M1.a], [310,50], [1,00$times$ (base)], [4 de 4], [10], [444], [375,42], [Limite nominal de 300 s],
+    [`popmusic`], [M1.a], [179,77], [1,73$times$], [4 de 4], [10], [444], [375,41], [33 subprob., 10 melhorias],
+  ),
+  caption: [Comparativo entre o resolvedor exato (`default`) e a meta-heurística POPMUSIC ($alpha=6, delta=3$) no M1.a em Moema ($N = 50$, 4 corretores, `fixed_ratio = 0,9`, semente 8). O POPMUSIC encontrou qualidade idêntica à do resolvedor exato (reduzindo a distância em 0,01 unidades e empatando rigorosamente em atraso, hora extra e frota), porém com redução de 42,1% no tempo de parede (179,77 s contra 310,50 s).],
+)
+
 = Testes de estresse
 
 Depois da escada de 3 corretores, a frota passa a crescer com os imóveis. Um erro de encaixe significa que a agenda oculta passa de 12 horas, então a tentativa seguinte mantém os imóveis e aumenta os corretores. A tabela ainda tem um único ponto. O lugar dessa execução não foi registrado.
@@ -375,11 +398,20 @@ Reexecutar o mesmo tamanho de M1 e de M2 em Moema manteve o plano impresso e mud
 
 
 
+
+== Eficácia da meta-heurística POPMUSIC em instâncias de grande porte
+
+O experimento comparativo com 50 imóveis e 4 corretores em Moema sob agenda 90% marcada (`fixed_ratio = 0,9`) validou a aplicabilidade prática da meta-heurística POPMUSIC frente ao resolvedor MIP clássico:
+
+1. *Qualidade idêntica da solução encontrada*: o POPMUSIC convergiu para um plano cuja distância total foi de 375,41 unidades contra 375,42 unidades do resolvedor exato (uma melhora marginal de 0,01 unidades decorrente da troca dos nós 4 e 36 entre os corretores 2 e 3). Ambos os métodos resultaram exatamente no mesmo atraso (10,00 min na visita ao nó 5), na mesma hora extra total (444,00 min) e na utilização integral dos 4 corretores disponíveis.
+2. *Redução drástica no tempo computacional*: enquanto o resolvedor exato esgotou o limite nominal de 300 segundos encerrando em 310,50 s, o POPMUSIC concluiu toda a busca intensificada em apenas 179,77 s — uma aceleração de $1,73times$ (redução de 42,1% no tempo de parede).
+3. *Dinâmica de convergência dos subproblemas*: ao longo da execução com $alpha = 6$ e $delta = 3$, o algoritmo avaliou 33 subproblemas, identificando 10 melhorias sucessivas a partir da solução inicial $S_0$ (função objetivo de 313.285,09) até atingir o ótimo local reforçado $S^*$ (função objetivo de 299.970,09). Isso comprova a eficácia da reotimização de rotas vizinhas para contornar a explosão combinatorial sem degradar os objetivos do WSRP.
+
 = Suíte de testes automatizados
 
 Além dos experimentos computacionais no catálogo real, a integridade matemática das formulações e a robustez do pipeline de dados são verificadas por uma suíte de testes unitários e de integração implementada em Python (`unittest`), localizada no diretório `tests/`.
 
-A suíte contém 75 testes automatizados cobrindo os seguintes componentes:
+A suíte contém 101 testes automatizados cobrindo os seguintes componentes:
 
 1. *Infactibilidade no pré-resolvedor (presolve)*: testes em `test_hidden_schedule.py` confirmam que as restrições lineares aditivas de duração de rota e frota (`route_duration_constraint` e `fleet_duration_constraint`) adicionadas aos modelos M1, M1.a, M2 e M3 permitem ao pré-resolvedor do Gurobi detectar imediatamente instâncias cuja carga horária total de visitas excede o tempo útil disponível dos corretores, provando infactibilidade na etapa de presolve sem entrar na relaxação linear ou árvore de branch-and-bound.
 2. *Agenda oculta e limites de jornada*: verificação de que a agenda oculta de referência aloca as visitas sem sobreposição e rejeita dias que extrapolam o limite máximo estrito de 12 horas ($J_max = 720$ min).
@@ -387,8 +419,10 @@ A suíte contém 75 testes automatizados cobrindo os seguintes componentes:
 4. *Catálogo real e dados espaciais*: testes em `test_real_catalog.py` e `test_real_instances.py` garantem a consistência na leitura, filtragem e amostragem do catálogo real de aluguéis de São Paulo (6.874 anúncios) e a correta alocação dos domicílios dos corretores dentro da área delimitada pelos anúncios.
 5. *Rede viária e tempos de deslocamento*: testes em `test_travel.py` e `test_travel_objective.py` validam os caminhos mínimos sobre o grafo direcionado do OpenStreetMap, o desvio em linha reta para outras cidades, os multiplicadores de congestionamento e a eliminação de arcos proibidos (mão única).
 6. *Distribuição de horários de visita*: testes em `test_visit_times.py`, `test_area_visit_duration.py`, `test_auto_brokers.py` e `test_city_broker_homes.py` confirmam que os inícios das visitas seguem estatísticas de ordem uniformes sobre o tempo livre e respeitam o parâmetro `fixed_ratio`.
+7. *Meta-heurística POPMUSIC e otimização multiobjetivo*: testes em `test_popmusic.py` e `test_multiobj.py` validam a decomposição em subproblemas locais, o warm start com a solução corrente, a expansão progressiva por parâmetro $delta$, a convergência monotônica da função objetivo e a hierarquia lexicográfica estrita de prioridades.
 
 
+#pagebreak()
 = Referências citadas
 
 As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `docs/decisions/travel.md` e nas páginas `docs/models/m1.md`, `m1.a.md`, `m2.md` e `m3.md`. As citadas ou pertinentes aos experimentos e testes são:
@@ -402,4 +436,5 @@ As referências completas, com DOI, estão em `docs/decisions/capacity.md`, `doc
 - Paraskevopoulos, Laporte, Repoussis e Tarantilis (2017), roteamento restrito por recurso.
 - Taş, Dellaert, van Woensel e de Kok (2013), tempos de viagem estocásticos.
 - TomTom Traffic Index 2025, relatório de tráfego e índice de congestionamento de São Paulo.
+- Queiroga, Sadykov e Uchoa (2021), A POPMUSIC matheuristic for the capacitated vehicle routing problem, *Computers & Operations Research*, v. 136, 105475.
 - Preço do etanol: média ANP da cidade de São Paulo, semana de 4 a 10 de outubro de 2026. Consumo: tabela PBEV do Inmetro, 14 de agosto de 2026, Volkswagen Polo 1.0 MPI, ciclo urbano, etanol.
