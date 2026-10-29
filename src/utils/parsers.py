@@ -227,6 +227,46 @@ def print_multiobj_summary(metrics: dict[str, Any]) -> None:
     print("=" * 62 + "\n")
 
 
+def print_popmusic_summary(metrics: dict[str, Any]) -> None:
+    """
+    Prints a summary table of POPMUSIC matheuristic execution metrics (Algorithm 1).
+
+    Args:
+        metrics (dict[str, Any]): Solver metrics returned by solve_popmusic.
+    """
+    if not metrics.get('popmusic'):
+        return
+
+    alpha_val = metrics.get('popmusic_alpha')
+    delta_val = metrics.get('popmusic_delta')
+    subproblems = metrics.get('popmusic_subproblems', 0)
+    improvements = metrics.get('popmusic_improvements', 0)
+    init_obj = metrics.get('initial_objective')
+    final_obj = metrics.get('final_objective')
+
+    params_str = f"alpha={alpha_val}, delta={delta_val}" if alpha_val is not None else f"r={metrics.get('popmusic_r', 2)}"
+    print("\n" + "=" * 72)
+    print(f"POPMUSIC MATHEURISTIC SUMMARY ({params_str})")
+    print("=" * 72)
+    print(f"Sub-problems Solved   : {subproblems}")
+    print(f"Improvements Found    : {improvements}")
+    if init_obj is not None:
+        print(f"Initial Objective (S0): {init_obj:.4f}")
+    if final_obj is not None:
+        print(f"Final Objective       : {final_obj:.4f}")
+    for entry in metrics.get('popmusic_history', []):
+        status_tag = "IMPROVED" if entry['improved'] else "NO CHANGE"
+        brokers_str = ", ".join(str(k) for k in entry['sub_brokers'])
+        seed_v = entry.get('seed_vertex', entry.get('seed_broker'))
+        dim_sp = entry.get('dim_sp', entry['num_sub_properties'])
+        print(
+            f"  Step {entry['step']:>2} | dim_sp={dim_sp:>2} | Seed i={seed_v:>2} -> Routes R=[{brokers_str}] "
+            f"(|V_sp|={entry['num_sub_properties']}) | {status_tag:<9} | Obj: {entry['objective']:.4f} "
+            f"({entry['cpu_time_seconds']:.3f}s)"
+        )
+    print("=" * 72 + "\n")
+
+
 def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None,
                   solver_mode: Optional[str] = None,
                   metrics: Optional[dict[str, Any]] = None) -> None:
@@ -241,6 +281,9 @@ def print_results(model: pyo.ConcreteModel, elapsed_time: Optional[float] = None
         solver_mode (Optional[str]): Solver mode the execution happened: 'raw' or 'default'.
         metrics (Optional[dict[str, Any]]): Optional solver metrics; if multi-objective, prints breakdown.
     """
+    if metrics and metrics.get('popmusic'):
+        print_popmusic_summary(metrics)
+
     if metrics and metrics.get('multiobj'):
         print_multiobj_summary(metrics)
 

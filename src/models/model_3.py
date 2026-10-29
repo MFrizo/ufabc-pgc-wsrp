@@ -192,7 +192,9 @@ def build_model_m3(data: dict, fleet_cap: Optional[int] = None) -> pyo.ConcreteM
     return model
 
 
-def pareto_front(data: dict, solver_name: str = 'gurobi_direct') -> list[dict]:
+def pareto_front(data: dict, solver_name: str = 'gurobi_direct',
+                 popmusic: bool = False, popmusic_r: int = 2,
+                 popmusic_sub_time_limit: Optional[float] = 30.0) -> list[dict]:
     """
     The non-dominated plans of M3. One MILP per fleet size: minimize the brokers' cost
     with at most m brokers at work, for m from 1 up to the fleet. A size the visits do
@@ -202,6 +204,9 @@ def pareto_front(data: dict, solver_name: str = 'gurobi_direct') -> list[dict]:
     Args:
         data (dict): The instance passed to build_model_m3.
         solver_name (str): Solver name forwarded to solve_model.
+        popmusic (bool): Whether to solve each fleet cap using the POPMUSIC matheuristic.
+        popmusic_r (int): Number of brokers r per POPMUSIC sub-problem.
+        popmusic_sub_time_limit (Optional[float]): Time limit in seconds per POPMUSIC sub-problem.
 
     Returns:
         list[dict]: Points ordered by the number of brokers. Each one has 'brokers',
@@ -210,8 +215,12 @@ def pareto_front(data: dict, solver_name: str = 'gurobi_direct') -> list[dict]:
     points = []
     for cap in range(1, data['num_brokers'] + 1):
         model = build_model_m3(data, fleet_cap=cap)
-        solved, metrics = solve_model(model, solver_name=solver_name, mip_gap=0.0, raw=True)
-        if metrics['termination_condition'] != 'optimal':
+        solved, metrics = solve_model(
+            model, solver_name=solver_name, mip_gap=0.0, raw=not popmusic,
+            popmusic=popmusic, popmusic_r=popmusic_r,
+            popmusic_sub_time_limit=popmusic_sub_time_limit,
+        )
+        if metrics['termination_condition'] not in ('optimal', 'locallyOptimal'):
             continue
         points.append(_point(solved, cap))
     return _nondominated(points)

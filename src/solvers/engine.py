@@ -67,6 +67,10 @@ def get_objective_breakdown(model: pyo.ConcreteModel) -> list[dict[str, Any]]:
         if hasattr(model, 'distance') and hasattr(model, 'x') and hasattr(model, 'ARCS'):
             dist_val = sum(pyo.value(model.distance[arc]) * pyo.value(model.x[arc]) for arc in model.ARCS)
             breakdown.append({'name': 'distance', 'value': dist_val, 'unit': 'units'})
+        if hasattr(model, 'max_workload'):
+            breakdown.append({'name': 'max_workload', 'value': pyo.value(model.max_workload), 'unit': 'min'})
+        if hasattr(model, 'broker_cost'):
+            breakdown.append({'name': 'broker_cost', 'value': pyo.value(model.broker_cost), 'unit': 'min'})
         return breakdown
 
     breakdown = []
@@ -88,10 +92,18 @@ def solve_model(model: pyo.ConcreteModel, solver_name: str = 'gurobi_direct',
                 raw: bool = False, multiobj: Optional[bool] = None,
                 multiobj_mode: str = 'hierarchical',
                 multiobj_specs: Optional[list[dict[str, Any]]] = None,
-                tee: bool = True) -> Tuple[pyo.ConcreteModel, dict[str, Any]]:
+                tee: bool = True, popmusic: bool = False,
+                popmusic_alpha: Optional[int] = None,
+                popmusic_delta: Optional[int] = None,
+                popmusic_r: Optional[int] = None,
+                popmusic_sub_time_limit: Optional[float] = 30.0,
+                popmusic_node_limit: Optional[int] = None,
+                popmusic_seed: int = 42,
+                solver_options: Optional[dict[str, Any]] = None) -> Tuple[pyo.ConcreteModel, dict[str, Any]]:
     """
-    Executes the optimization process using the specified solver. Supports standard single-objective
-    and Gurobi native multi-objective optimization (hierarchical, blended, lexicographic).
+    Executes the optimization process using the specified solver. Supports standard single-objective,
+    Gurobi native multi-objective optimization (hierarchical, blended, lexicographic), and the
+    POPMUSIC matheuristic decomposition framework (Algorithm 1 of Queiroga, Sadykov, & Uchoa, 2021).
 
     Args:
         model (pyo.ConcreteModel): The instantiated abstract polyhedron.
@@ -111,10 +123,39 @@ def solve_model(model: pyo.ConcreteModel, solver_name: str = 'gurobi_direct',
         multiobj_specs (Optional[list[dict]]): Custom multi-objective specifications. If None,
             reads model.multiobj_specs.
         tee (bool): Stream solver logs to the console. Defaults to True.
+        popmusic (bool): If True, solves the model via the POPMUSIC matheuristic decomposition
+            (Algorithm 1 of Queiroga, Sadykov, & Uchoa, 2021).
+        popmusic_alpha (Optional[int]): Initial target customer dimension alpha for dim_sp.
+        popmusic_delta (Optional[int]): Step size delta to increase dim_sp.
+        popmusic_r (Optional[int]): Optional route-count hint used when alpha is not set.
+        popmusic_sub_time_limit (Optional[float]): Time limit in seconds per POPMUSIC subproblem.
+        popmusic_node_limit (Optional[int]): Branch-and-bound node limit per POPMUSIC subproblem.
+        popmusic_seed (int): Random seed for shuffling customer vector L in POPMUSIC.
+        solver_options (Optional[dict[str, Any]]): Extra solver options injected before solving.
 
     Returns:
         Tuple containing the optimized model and a dictionary of benchmark metrics.
     """
+    if popmusic:
+        from src.solvers.popmusic import solve_popmusic
+        return solve_popmusic(
+            model=model,
+            solver_name=solver_name,
+            alpha=popmusic_alpha,
+            delta=popmusic_delta,
+            sub_size=popmusic_r,
+            sub_time_limit=popmusic_sub_time_limit,
+            sub_node_limit=popmusic_node_limit,
+            time_limit=time_limit,
+            mip_gap=mip_gap,
+            raw=raw,
+            multiobj=multiobj,
+            multiobj_mode=multiobj_mode,
+            multiobj_specs=multiobj_specs,
+            seed=popmusic_seed,
+            tee=tee,
+        )
+
     # 1. Strategy Instantiation
     try:
         solver = pyo.SolverFactory(solver_name)
@@ -129,12 +170,20 @@ def solve_model(model: pyo.ConcreteModel, solver_name: str = 'gurobi_direct',
         if raw:
             for param_name, param_value in GUROBI_RAW_PARAMS.items():
                 solver.options[param_name] = param_value
+        if solver_options:
+            for param_name, param_value in solver_options.items():
+                if param_value is not None:
+                    solver.options[param_name] = param_value
     elif solver_name == 'cbc':
         if multiobj:
             raise ValueError("Multi-objective optimization is only supported with Gurobi ('gurobi_direct', 'gurobi').")
         if time_limit is not None:
             solver.options['sec'] = time_limit
         solver.options['ratio'] = mip_gap
+        if solver_options:
+            for param_name, param_value in solver_options.items():
+                if param_value is not None:
+                    solver.options[param_name] = param_value
 
     start_time = time.time()
 
